@@ -1,5 +1,6 @@
+// prisma/schema.prisma
 datasource db {
-  provider = "sqlite"
+  provider = "sqlite" // or "postgresql" if you already use PG
   url      = env("DATABASE_URL")
 }
 
@@ -7,66 +8,118 @@ generator client {
   provider = "prisma-client-js"
 }
 
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  // credentials auth
+  passwordHash  String? // only when using Credentials provider
+
+  classes Class[]
+  chats   ChatMessage[]
+
+  accounts  Account[]
+  sessions  Session[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+/**
+ * * Your app data **
+ */
 model Class {
-  id        String   @id @default(cuid())
-  name      String
-  createdAt DateTime @default(now())
+  id     String @id @default(cuid())
+  name   String
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   lectures Lecture[]
   chats    ChatMessage[]
-  Chunk    Chunk[]
+  chunks   Chunk[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Lecture {
-  id      String @id @default(cuid())
-  classId String
-  class   Class  @relation(fields: [classId], references: [id])
-
+  id           String   @id @default(cuid())
+  classId      String
+  clazz        Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
   originalName String
-  filePath     String
+  filePath     String?
+  status       String   @default("PROCESSING")
   durationSec  Int?
-  status       LectureStatus @default(UPLOADED)
   transcript   String?
   segmentsJson String?
   summaryJson  String?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-
-  chunks Chunk[]
-}
-
-enum LectureStatus {
-  UPLOADED
-  PROCESSING
-  READY
-  FAILED
+  chunks       Chunk[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model Chunk {
-  id String @id @default(cuid())
-
-  classId String
-  class   Class  @relation(fields: [classId], references: [id])
-
-  lectureId String
-  lecture   Lecture @relation(fields: [lectureId], references: [id])
-
+  id         String   @id @default(cuid())
+  classId    String
+  lectureId  String
   source     String
-  startSec   Int?
-  endSec     Int?
+  startSec   Int
+  endSec     Int
   text       String
   vectorJson String
   createdAt  DateTime @default(now())
+
+  // relations
+  clazz   Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  lecture Lecture @relation(fields: [lectureId], references: [id], onDelete: Cascade)
 }
 
 model ChatMessage {
-  id String @id @default(cuid())
-
-  classId String
-  class   Class  @relation(fields: [classId], references: [id])
-
+  id        String   @id @default(cuid())
+  classId   String
+  userId    String // owner of the class / chat thread
   role      String // "user" | "assistant"
   content   String
-  citations String? // JSON of [{lectureId, chunkId, startSec, endSec}]
+  citations String?
   createdAt DateTime @default(now())
+
+  clazz Class @relation(fields: [classId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

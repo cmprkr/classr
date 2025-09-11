@@ -1,11 +1,12 @@
-// app/api/classes/[classId]/upload/route.ts
+// src/app/api/classes/[classId]/upload/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { requireUser } from "@/lib/auth";
 import { openai, MODELS } from "@/lib/openai";
 import { uploadsPath } from "@/lib/paths";
 import { chunkTranscript } from "@/lib/chunking";
-import fs from "fs";                // ← Node fs (streams)
-import fsp from "fs/promises";      // ← fs promises
+import fs from "fs";          // Node streams
+import fsp from "fs/promises";
 import path from "path";
 
 export const runtime = "nodejs";
@@ -15,8 +16,11 @@ export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ classId: string }> }
 ) {
-  const { classId } = await ctx.params; // ✅ await params
-  const clazz = await db.class.findUnique({ where: { id: classId } });
+  const { classId } = await ctx.params;
+
+  // ✅ require signed-in user and ownership of the class
+  const user = await requireUser();
+  const clazz = await db.class.findFirst({ where: { id: classId, userId: user.id } });
   if (!clazz) return NextResponse.json({ error: "class not found" }, { status: 404 });
 
   await fsp.mkdir(uploadsPath(), { recursive: true });
@@ -25,7 +29,7 @@ export async function POST(
   const files = form.getAll("file") as File[];
   if (!files.length) return NextResponse.json({ error: "no files" }, { status: 400 });
 
-  const results: any[] = [];
+  const results: Array<{ lectureId: string; status: "READY" | "FAILED"; error?: string }> = [];
 
   for (const f of files) {
     const arrBuf = await f.arrayBuffer();
@@ -45,10 +49,10 @@ export async function POST(
     });
 
     try {
-      // ✅ Use a Node read stream for OpenAI transcription
+      // ✅ Transcribe with OpenAI using a Node read stream
       const fileStream = fs.createReadStream(dest);
       const tr: any = await openai.audio.transcriptions.create({
-        model: MODELS.stt, // "whisper-1"
+        model: MODELS.stt, // e.g. "whisper-1"
         file: fileStream,
         response_format: "verbose_json",
       });
@@ -58,12 +62,10 @@ export async function POST(
         end: Math.ceil(s.end),
         text: s.text,
       }));
+      const transcriptText = tr.text || segments.map((s: any) => s.text).join(" ");
 
-      const transcriptText =
-        tr.text || segments.map((s: any) => s.text).join(" ");
-
+      // Chunk + embed
       const chunks = chunkTranscript(segments);
-
       const embeddings = await openai.embeddings.create({
         model: MODELS.embed,
         input: chunks.map((c) => c.text),
@@ -94,6 +96,7 @@ export async function POST(
         }
       });
 
+      // Generate concise study notes
       const summary = await openai.chat.completions.create({
         model: MODELS.chat,
         messages: [

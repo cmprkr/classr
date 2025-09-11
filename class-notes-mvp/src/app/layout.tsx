@@ -1,13 +1,19 @@
 // app/layout.tsx
 import "./globals.css";
-export const metadata = { title: "Class Notes MVP" };
+import Sidebar from "@/components/Sidebar";
+
+export const metadata = { title: "Product 1" };
 
 export default function Root({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      {/* 👇 add suppressHydrationWarning */}
-      <body suppressHydrationWarning className="min-h-screen bg-gray-50 text-gray-900">
-        {children}
+      <body suppressHydrationWarning className="bg-white text-gray-800 h-screen overflow-hidden">
+        <div className="flex h-full">
+          <Sidebar />
+          <main className="flex-1 flex overflow-hidden">
+            {children}
+          </main>
+        </div>
       </body>
     </html>
   );

@@ -3,16 +3,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { openai, MODELS } from "@/lib/openai";
 import { cosine } from "@/lib/chunking";
+import { requireUser } from "@/lib/auth";
 
-export async function POST(
-  req: NextRequest,
-  ctx: { params: Promise<{ classId: string }> }
-) {
-  const { classId } = await ctx.params;             // ✅ await
+export async function POST(req: NextRequest, ctx: { params: Promise<{ classId: string }> }) {
+  const { classId } = await ctx.params;
+  const user = await requireUser();
   const { message } = await req.json();
   if (!message?.trim()) return NextResponse.json({ error: "message required" }, { status: 400 });
 
-  const clazz = await db.class.findUnique({ where: { id: classId }});
+  const clazz = await db.class.findFirst({ where: { id: classId, userId: user.id }});
   if (!clazz) return NextResponse.json({ error: "class not found" }, { status: 404 });
 
   const q = await openai.embeddings.create({ model: MODELS.embed, input: message });
@@ -26,7 +25,7 @@ export async function POST(
 
   const context = top.map(({ ch }) => `[${ch.id}] (${ch.lectureId} @ ${ch.startSec}-${ch.endSec}s)\n${ch.text}`).join("\n\n");
 
-  await db.chatMessage.create({ data: { classId, role: "user", content: message } });
+  await db.chatMessage.create({ data: { classId, userId: user.id, role: "user", content: message } });
 
   const sys = `You are a tutor for this class. ONLY use the provided CONTEXT. If the answer is not in context, say you don't know. Cite chunk IDs like [chunkId]. Be concise.`;
   const prompt = `QUESTION:\n${message}\n\nCONTEXT:\n${context}`;
@@ -40,7 +39,7 @@ export async function POST(
   const citations = top.map(({ ch }) => ({ lectureId: ch.lectureId, chunkId: ch.id, startSec: ch.startSec, endSec: ch.endSec }));
 
   await db.chatMessage.create({
-    data: { classId, role: "assistant", content: answer, citations: JSON.stringify(citations) },
+    data: { classId, userId: user.id, role: "assistant", content: answer, citations: JSON.stringify(citations) },
   });
 
   return NextResponse.json({ answer, citations });
