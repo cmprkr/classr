@@ -1,0 +1,72 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Class {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  lectures Lecture[]
+  chats    ChatMessage[]
+  Chunk    Chunk[]
+}
+
+model Lecture {
+  id      String @id @default(cuid())
+  classId String
+  class   Class  @relation(fields: [classId], references: [id])
+
+  originalName String
+  filePath     String
+  durationSec  Int?
+  status       LectureStatus @default(UPLOADED)
+  transcript   String?
+  segmentsJson String?
+  summaryJson  String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  chunks Chunk[]
+}
+
+enum LectureStatus {
+  UPLOADED
+  PROCESSING
+  READY
+  FAILED
+}
+
+model Chunk {
+  id String @id @default(cuid())
+
+  classId String
+  class   Class  @relation(fields: [classId], references: [id])
+
+  lectureId String
+  lecture   Lecture @relation(fields: [lectureId], references: [id])
+
+  source     String
+  startSec   Int?
+  endSec     Int?
+  text       String
+  vectorJson String
+  createdAt  DateTime @default(now())
+}
+
+model ChatMessage {
+  id String @id @default(cuid())
+
+  classId String
+  class   Class  @relation(fields: [classId], references: [id])
+
+  role      String // "user" | "assistant"
+  content   String
+  citations String? // JSON of [{lectureId, chunkId, startSec, endSec}]
+  createdAt DateTime @default(now())
+}
