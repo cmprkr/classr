@@ -1,104 +1,70 @@
-// app/class/[id]/page.tsx
-import Uploader from "@/components/Uploader";
-import ClassChat from "@/components/ClassChat";
+// src/app/class/[id]/page.tsx
 import { db } from "@/lib/db";
+import { requireUser } from "@/lib/auth";
+import Link from "next/link";
+import Uploader from "@/components/Uploader";
+import LectureItem from "@/components/LectureItem";
+import Chat from "@/components/ClassChat";
 
-export default async function ClassPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { id } = await params;
+export const dynamic = "force-dynamic";
 
-  const cls = await db.class.findUnique({
-    where: { id },
-    include: { lectures: { orderBy: { createdAt: "desc" } }, chats: true },
+export default async function ClassPage(props: { params: Promise<{ id: string }> }) {
+  const { id } = await props.params;
+  const user = await requireUser();
+
+  const cls = await db.class.findFirst({
+    where: { id, userId: user.id },
+    include: {
+      lectures: { orderBy: { createdAt: "desc" } },
+      chats: { orderBy: { createdAt: "asc" } },
+    },
   });
 
+  if (!cls) {
+    return (
+      <main className="mx-auto max-w-5xl p-6">
+        <Link href="/" className="text-sm opacity-80 hover:underline">&larr; Back</Link>
+        <h1 className="mt-3 text-2xl font-semibold">Class not found</h1>
+      </main>
+    );
+  }
+
   return (
-    <>
-      {/* Middle list: lectures */}
-      <section className="w-96 bg-white border-r overflow-y-auto p-4 space-y-3">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-lg font-semibold">{cls?.name ?? "Class"}</h2>
-          <a href="/" className="text-xs text-blue-600 hover:underline">&larr; All Classes</a>
+    // full-height split panes; left = items list, right = content
+    <main className="h-screen w-full overflow-hidden flex bg-white">
+      {/* Left: Items list (second sidebar) */}
+      <aside className="w-96 shrink-0 border-r bg-white flex flex-col">
+        <div className="p-4 border-b">
+          <Link href="/" className="text-sm opacity-80 hover:underline">&larr; Back</Link>
+          <h2 className="mt-2 text-sm font-semibold">Items</h2>
         </div>
-
-        <div className="space-y-2">
-          {(cls?.lectures ?? []).map((l) => (
-            <details key={l.id} className="bg-gray-50 rounded-lg border">
-              <summary className="p-3 cursor-pointer">
-                <div className="text-sm font-semibold text-gray-900">{l.originalName}</div>
-                <div className="text-xs text-gray-600 mt-1">
-                  Status: {l.status}
-                  {l.status === "READY" && ` • ${l.durationSec ?? "?"}s`}
-                </div>
-              </summary>
-              {l.summaryJson && (
-                <div className="px-3 pb-3 text-sm text-gray-900">
-                  <div className="font-medium mb-1">Summary</div>
-                  <div className="bg-white border rounded p-2 whitespace-pre-wrap">
-                    {String(l.summaryJson).slice(0, 240)}
-                    {String(l.summaryJson).length > 240 ? "…" : ""}
-                  </div>
-                </div>
-              )}
-            </details>
-          ))}
-          {(cls?.lectures ?? []).length === 0 && (
-            <div className="text-sm text-gray-600">No lectures yet.</div>
+        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          {cls.lectures.length === 0 && (
+            <div className="text-sm opacity-70">No items yet.</div>
           )}
+          {cls.lectures.map((l) => (
+            <LectureItem key={l.id} l={l} />
+          ))}
         </div>
-      </section>
+      </aside>
 
-      {/* Right panel: same “calm white” vibe as welcome page */}
-      <section className="flex-1 bg-white overflow-y-auto">
-        <div className="mx-auto max-w-6xl p-6 space-y-6">
-          {/* Hero-ish header to mirror welcome feel */}
-          <div className="text-center">
-            <div className="inline-block px-4 py-1 bg-gradient-to-r from-pink-300 to-purple-300 rounded-full text-xs text-white font-semibold mb-4">
-              {cls?.name ?? "Class"}
-            </div>
-            <p className="text-lg font-semibold text-gray-600">
-              Upload audio, read summaries, browse transcripts, and chat scoped to this class.
-            </p>
+      {/* Right: Content area */}
+      <section className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-4xl p-6 space-y-6">
+          <h1 className="text-2xl font-semibold">{cls.name}</h1>
+
+          {/* Uploader card */}
+          <div className="rounded-2xl border bg-white p-4">
+            <h3 className="font-medium mb-2">Add Material</h3>
+            <Uploader classId={cls.id} />
           </div>
 
-          <div className="grid md:grid-cols-2 gap-6">
-            <Uploader classId={id} />
-
-            {/* Full summaries & transcripts */}
-            <div className="rounded-2xl border bg-white p-4">
-              <h3 className="font-medium mb-2 text-black">Lecture Details</h3>
-              <div className="space-y-4">
-                {(cls?.lectures ?? []).map((l) => (
-                  <details key={l.id} className="border rounded">
-                    <summary className="p-3 cursor-pointer text-sm font-semibold text-gray-900">
-                      {l.originalName}
-                    </summary>
-                    <div className="p-3 space-y-4">
-                      <div>
-                        <div className="font-medium text-black mb-1">Summary</div>
-                        <pre className="whitespace-pre-wrap text-black text-sm bg-gray-50 rounded p-2">
-                          {l.summaryJson || "No summary available."}
-                        </pre>
-                      </div>
-                      <div>
-                        <div className="font-medium text-black mb-1">Transcript</div>
-                        <pre className="whitespace-pre-wrap text-black text-sm bg-gray-50 rounded p-2 max-h-72 overflow-auto">
-                          {l.transcript || "No transcript stored."}
-                        </pre>
-                      </div>
-                    </div>
-                  </details>
-                ))}
-              </div>
-            </div>
+          {/* Chat (spans content width) */}
+          <div className="rounded-2xl border bg-white p-4">
+            <Chat classId={cls.id} />
           </div>
-
-          <ClassChat classId={id} />
         </div>
       </section>
-    </>
+    </main>
   );
 }

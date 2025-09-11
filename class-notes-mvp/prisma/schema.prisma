@@ -79,10 +79,26 @@ model Class {
   updatedAt DateTime @updatedAt
 }
 
+enum ResourceType {
+  LECTURE
+  SLIDESHOW
+  NOTES
+  HOMEWORK_GRADED
+  HOMEWORK_UNGRADED
+  OTHER
+}
+
 model Lecture {
   id           String   @id @default(cuid())
   classId      String
   clazz        Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  // New fields
+  kind         ResourceType @default(LECTURE) // category
+  descriptor   String?                      // user-provided short description
+  mime         String?                      // uploaded mime type
+  textContent  String?                      // generic extracted text (pdf/txt/img/docx)
+  
   originalName String
   filePath     String?
   status       String   @default("PROCESSING")
@@ -90,6 +106,7 @@ model Lecture {
   transcript   String?
   segmentsJson String?
   summaryJson  String?
+
   chunks       Chunk[]
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

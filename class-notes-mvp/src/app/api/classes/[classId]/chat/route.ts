@@ -1,46 +1,180 @@
-// app/api/classes/[classId]/chat/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { openai, MODELS } from "@/lib/openai";
-import { cosine } from "@/lib/chunking";
 import { requireUser } from "@/lib/auth";
+import { openai, MODELS } from "@/lib/openai";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+type Cit = {
+  lectureId: string;
+  source: string;
+  startSec?: number | null;
+  endSec?: number | null;
+  text: string;
+  score: number;
+  originalName?: string;
+};
+
+function cosine(a: number[], b: number[]) {
+  let dot = 0, na = 0, nb = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  if (na === 0 || nb === 0) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+function toPreview(text: string, max = 280) {
+  const t = (text || "").replace(/\s+/g, " ").trim();
+  return t.length <= max ? t : t.slice(0, max - 1) + "…";
+}
+
+async function backfillVectors(classId: string, maxToEmbed = 200) {
+  // Pull chunks for this class that are missing vectors
+  const missing = await db.chunk.findMany({
+    where: { classId, OR: [{ vectorJson: "" }, { vectorJson: "" }] },
+    orderBy: { createdAt: "desc" },
+    take: maxToEmbed,
+    select: { id: true, text: true },
+  });
+  const inputs = missing.map(m => (m.text || "").trim()).filter(Boolean);
+  if (missing.length === 0 || inputs.length === 0) return 0;
+
+  const emb = await openai.embeddings.create({ model: MODELS.embed, input: inputs });
+  // Update rows in the same order we built inputs
+  let idx = 0;
+  for (let i = 0; i < missing.length; i++) {
+    // Skip rows whose text was empty after trim (was filtered out)
+    if (!missing[i].text || !missing[i].text.trim()) continue;
+    await db.chunk.update({
+      where: { id: missing[i].id },
+      data: { vectorJson: JSON.stringify(emb.data[idx++].embedding) },
+    });
+  }
+  return idx;
+}
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ classId: string }> }) {
-  const { classId } = await ctx.params;
-  const user = await requireUser();
-  const { message } = await req.json();
-  if (!message?.trim()) return NextResponse.json({ error: "message required" }, { status: 400 });
+  try {
+    const { classId } = await ctx.params;
+    const user = await requireUser();
+    const { message } = await req.json();
 
-  const clazz = await db.class.findFirst({ where: { id: classId, userId: user.id }});
-  if (!clazz) return NextResponse.json({ error: "class not found" }, { status: 404 });
+    const query = (message ?? "").trim();
+    if (!query) return NextResponse.json({ error: "Message required" }, { status: 400 });
 
-  const q = await openai.embeddings.create({ model: MODELS.embed, input: message });
-  const qv = q.data[0].embedding;
+    // Ownership guard
+    const clazz = await db.class.findFirst({
+      where: { id: classId, userId: user.id },
+      select: { id: true, name: true },
+    });
+    if (!clazz) return NextResponse.json({ error: "Class not found" }, { status: 404 });
 
-  const chunks = await db.chunk.findMany({ where: { classId }, take: 500, orderBy: { createdAt: "desc" }});
-  const top = chunks
-    .map((ch) => ({ ch, score: cosine(qv, JSON.parse(ch.vectorJson) as number[]) }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 8);
+    // Persist user message
+    await db.chatMessage.create({ data: { classId, userId: user.id, role: "user", content: query } });
 
-  const context = top.map(({ ch }) => `[${ch.id}] (${ch.lectureId} @ ${ch.startSec}-${ch.endSec}s)\n${ch.text}`).join("\n\n");
+    // Embed query
+    const qEmbRes = await openai.embeddings.create({ model: MODELS.embed, input: query });
+    const qVec = qEmbRes.data[0].embedding as number[];
 
-  await db.chatMessage.create({ data: { classId, userId: user.id, role: "user", content: message } });
+    // Ensure vectors exist for recent chunks (lazy backfill)
+    await backfillVectors(classId, 300);
 
-  const sys = `You are a tutor for this class. ONLY use the provided CONTEXT. If the answer is not in context, say you don't know. Cite chunk IDs like [chunkId]. Be concise.`;
-  const prompt = `QUESTION:\n${message}\n\nCONTEXT:\n${context}`;
+    // Pull chunks (newest first)
+    const chunks = await db.chunk.findMany({
+      where: { classId },
+      orderBy: { createdAt: "desc" },
+      take: 4000,
+      select: {
+        id: true, lectureId: true, source: true, startSec: true, endSec: true, text: true, vectorJson: true,
+        lecture: { select: { originalName: true } },
+      },
+    });
 
-  const resp = await openai.chat.completions.create({
-    model: MODELS.chat,
-    messages: [{ role: "system", content: sys }, { role: "user", content: prompt }],
-  });
+    // Score
+    const scored: Cit[] = [];
+    for (const c of chunks) {
+      if (!c.vectorJson) continue;
+      let v: number[] | null = null;
+      try { v = JSON.parse(c.vectorJson as any); } catch {}
+      if (!v) continue;
+      const score = cosine(qVec, v);
+      if (score > 0) {
+        scored.push({
+          lectureId: c.lectureId,
+          source: c.source,
+          startSec: c.startSec,
+          endSec: c.endSec,
+          text: c.text,
+          score,
+          originalName: c.lecture?.originalName ?? undefined,
+        });
+      }
+    }
 
-  const answer = resp.choices[0].message.content || "…";
-  const citations = top.map(({ ch }) => ({ lectureId: ch.lectureId, chunkId: ch.id, startSec: ch.startSec, endSec: ch.endSec }));
+    scored.sort((a, b) => b.score - a.score);
+    const topK = scored.slice(0, 12);
 
-  await db.chatMessage.create({
-    data: { classId, userId: user.id, role: "assistant", content: answer, citations: JSON.stringify(citations) },
-  });
+    // Class chat history window (last ~12 turns)
+    const history = await db.chatMessage.findMany({
+      where: { classId, userId: user.id },
+      orderBy: { createdAt: "asc" },
+      take: 50,
+      select: { role: true, content: true },
+    });
 
-  return NextResponse.json({ answer, citations });
+    const contextBlocks = topK.map((c, i) =>
+      `[#${i + 1} | ${c.source}${c.originalName ? ` • ${c.originalName}` : ""}${c.startSec!=null?` • ${c.startSec}-${c.endSec}s`:""} | score=${c.score.toFixed(3)}]\n${c.text}`
+    ).join("\n\n");
+
+    const historyBlocks = history.slice(-12)
+      .map(m => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+      .join("\n");
+
+    const system =
+      `You are a helpful TA for the course "${clazz.name}". ` +
+      `Use only the provided class materials and the recent chat history. ` +
+      `If an answer isn’t in the materials, say you don’t know. ` +
+      `Cite snippets using [#index] corresponding to the context items. Be concise and precise.`;
+
+    const userPrompt =
+`Class context:
+${contextBlocks || "(no relevant snippets found)"}
+
+Recent chat (this class):
+${historyBlocks || "(no recent messages yet)"}
+
+Question:
+${query}
+`;
+
+    const completion = await openai.chat.completions.create({
+      model: MODELS.chat,
+      temperature: 0.2,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: userPrompt },
+      ],
+    });
+
+    const answer = completion.choices[0].message.content ?? "Sorry, I couldn’t generate a response.";
+    const citations = topK.map((c, idx) => ({
+      idx: idx + 1,
+      lectureId: c.lectureId,
+      source: c.source,
+      span: c.startSec != null ? { startSec: c.startSec, endSec: c.endSec } : undefined,
+      preview: toPreview(c.text),
+      originalName: c.originalName,
+      score: c.score,
+    }));
+
+    await db.chatMessage.create({
+      data: { classId, userId: user.id, role: "assistant", content: answer, citations: JSON.stringify(citations) },
+    });
+
+    return NextResponse.json({ answer, citations });
+  } catch (e: any) {
+    console.error("chat route error:", e?.message || e);
+    return NextResponse.json({ error: e?.message || "Internal error" }, { status: 500 });
+  }
 }
