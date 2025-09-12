@@ -1,37 +1,87 @@
-"use client";
-import { useState } from "react";
+// app/auth/signup/page.tsx
+import AllClassesPanel from "@/components/AllClassesPanel";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import Link from "next/link";
 
-export default function SignUpPage() {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState(""); 
-  const [password, setPassword] = useState("");
-  const [msg, setMsg] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setMsg(null); setErr(null);
-    const r = await fetch("/api/auth/signup", {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ name, email, password }),
-    });
-    const j = await r.json();
-    if (r.ok) setMsg("Account created. You can sign in now.");
-    else setErr(j.error || "Failed to create account");
-  }
+export default async function SignUpPage() {
+  const session = await getServerSession(authOptions);
 
   return (
-    <div className="w-full flex items-center justify-center">
-      <form onSubmit={onSubmit} className="max-w-sm w-full p-6 space-y-4">
-        <h1 className="text-xl font-semibold">Create account</h1>
-        <input className="w-full border rounded px-3 py-2" value={name} onChange={e=>setName(e.target.value)} placeholder="Name"/>
-        <input className="w-full border rounded px-3 py-2" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com"/>
-        <input className="w-full border rounded px-3 py-2" value={password} onChange={e=>setPassword(e.target.value)} type="password" placeholder="Password"/>
-        {err && <div className="text-sm text-red-600">{err}</div>}
-        {msg && <div className="text-sm text-green-700">{msg}</div>}
-        <button className="w-full bg-black text-white rounded py-2">Create account</button>
-      </form>
-    </div>
+    <>
+      {/* Left: All Classes list (unchanged) */}
+      <AllClassesPanel />
+
+      {/* Right: Gradient + centered white card */}
+      <section className="relative flex-1 overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-br from-indigo-200 via-fuchsia-200 to-pink-200" />
+        <div className="relative h-full w-full flex items-center justify-center p-6">
+          <div className="w-full max-w-lg">
+            <div className="rounded-2xl bg-white shadow-xl ring-1 ring-black/5 p-6 sm:p-8">
+              <h1 className="text-2xl font-semibold mb-4 text-gray-900">Create account</h1>
+
+              {session ? (
+                <div className="space-y-6">
+                  <div className="rounded-xl border bg-white p-4">
+                    <div className="text-sm text-gray-600">You’re already signed in as</div>
+                    <div className="text-lg text-gray-900">{session.user?.name || "User"}</div>
+                    <div className="text-gray-700">{session.user?.email}</div>
+                  </div>
+                  <form action="/api/auth/signout" method="post">
+                    <button className="rounded-lg bg-red-600 px-4 py-2 text-white">
+                      Sign out
+                    </button>
+                  </form>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {/* Signup form — point this to your signup API route */}
+                  <form
+                    action="/api/auth/signup"
+                    method="post"
+                    className="space-y-4"
+                  >
+                    <input
+                      type="text"
+                      name="name"
+                      required
+                      placeholder="Full name"
+                      className="w-full rounded-lg border px-3 py-2 bg-white text-black placeholder-gray-500"
+                    />
+                    <input
+                      type="email"
+                      name="email"
+                      required
+                      placeholder="Email"
+                      className="w-full rounded-lg border px-3 py-2 bg-white text-black placeholder-gray-500"
+                    />
+                    <input
+                      type="password"
+                      name="password"
+                      required
+                      placeholder="Password"
+                      className="w-full rounded-lg border px-3 py-2 bg-white text-black placeholder-gray-500"
+                    />
+                    <button
+                      type="submit"
+                      className="w-full rounded-lg bg-black px-4 py-2 text-white"
+                    >
+                      Create account
+                    </button>
+                  </form>
+
+                  <div className="text-sm text-gray-700">
+                    Already have an account?{" "}
+                    <Link href="/auth/signin" className="underline">
+                      Sign in
+                    </Link>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+    </>
   );
 }
