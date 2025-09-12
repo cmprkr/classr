@@ -62,7 +62,7 @@ export default function Home() {
     <>
       {/* Middle list panel */}
       <section className="w-96 bg-white border-r overflow-y-auto p-4 space-y-3">
-        <h2 className="text-lg font-semibold border-b pb-2 mb-2">All Classes ({classes.length})</h2>
+        <h2 className="text-lg font-semibold text-black border-b pb-2 mb-2">All Classes ({classes.length})</h2>
 
         <div className="flex gap-2">
           <input

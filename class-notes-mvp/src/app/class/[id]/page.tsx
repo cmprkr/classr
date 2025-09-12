@@ -2,9 +2,8 @@
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import Link from "next/link";
-import Uploader from "@/components/Uploader";
-import LectureItem from "@/components/LectureItem";
 import Chat from "@/components/ClassChat";
+import ClassLeftPane from "@/components/ClassLeftPane"; // ← new
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +22,7 @@ export default async function ClassPage(props: { params: Promise<{ id: string }>
   if (!cls) {
     return (
       <main className="mx-auto max-w-5xl p-6">
-        <Link href="/" className="text-sm opacity-80 hover:underline">&larr; Back</Link>
+        <Link href="/" className="text-sm text-black hover:underline">&larr; Back</Link>
         <h1 className="mt-3 text-2xl font-semibold">Class not found</h1>
       </main>
     );
@@ -32,35 +31,14 @@ export default async function ClassPage(props: { params: Promise<{ id: string }>
   return (
     // full-height split panes; left = items list, right = content
     <main className="h-screen w-full overflow-hidden flex bg-white">
-      {/* Left: Items list (second sidebar) */}
-      <aside className="w-96 shrink-0 border-r bg-white flex flex-col">
-        <div className="p-4 border-b">
-          <Link href="/" className="text-sm opacity-80 hover:underline">&larr; Back</Link>
-          <h2 className="mt-2 text-sm font-semibold">Items</h2>
-        </div>
-        <div className="flex-1 overflow-y-auto p-3 space-y-2">
-          {cls.lectures.length === 0 && (
-            <div className="text-sm opacity-70">No items yet.</div>
-          )}
-          {cls.lectures.map((l) => (
-            <LectureItem key={l.id} l={l} />
-          ))}
-        </div>
-      </aside>
+      {/* Left: Use new client component that controls uploader visibility but keeps it at the top */}
+      <ClassLeftPane classId={cls.id} lectures={cls.lectures as any[]} />
 
-      {/* Right: Content area */}
-      <section className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-4xl p-6 space-y-6">
-          <h1 className="text-2xl font-semibold">{cls.name}</h1>
-
-          {/* Uploader card */}
-          <div className="rounded-2xl border bg-white p-4">
-            <h3 className="font-medium mb-2">Add Material</h3>
-            <Uploader classId={cls.id} />
-          </div>
-
-          {/* Chat (spans content width) */}
-          <div className="rounded-2xl border bg-white p-4">
+      {/* Right: Content area (unchanged) */}
+      <section className="flex-1 overflow-hidden">
+        <div className="h-full mx-auto max-w-4xl p-6 flex flex-col">
+          <h1 className="text-2xl font-semibold text-black">{cls.name}</h1>
+          <div className="flex-1 p-4 rounded-2xl border bg-white overflow-y-auto">
             <Chat classId={cls.id} />
           </div>
         </div>
