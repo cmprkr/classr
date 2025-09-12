@@ -24,3 +24,12 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* --- App-wide safety guards --- */
+
+/* Prevent “jump to top” from stray <a href="#"> or empty hrefs anywhere */
+a[href="#"],
+a[href=""] {
+  pointer-events: none;
+  cursor: default;
+}

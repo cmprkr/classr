@@ -1,4 +1,3 @@
-// components/AllClassesPanel.tsx
 "use client";
 import { useEffect, useState } from "react";
 
@@ -72,14 +71,19 @@ export default function AllClassesPanel() {
           placeholder="Add a class…"
           className="border rounded-lg px-3 py-2 w-full text-black placeholder:text-gray-500 bg-white"
         />
-        <button onClick={create} className="px-4 py-2 rounded-lg bg-black text-white">Add</button>
+        <button type="button" onClick={create} className="px-4 py-2 rounded-lg bg-black text-white">
+          Add
+        </button>
       </div>
 
       <div className="space-y-2">
         {classes.map((c) => {
           const isEditing = editingId === c.id;
           return (
-            <div key={c.id} className="p-3 bg-gray-50 rounded-lg border hover:bg-gray-100 flex items-start justify-between gap-3">
+            <div
+              key={c.id}
+              className="p-3 bg-gray-50 rounded-lg border hover:bg-gray-100 flex items-start justify-between gap-3"
+            >
               <div className="flex-1 min-w-0">
                 {isEditing ? (
                   <div className="flex items-center gap-2">
@@ -89,8 +93,12 @@ export default function AllClassesPanel() {
                       className="border rounded px-2 py-1 w-full text-black"
                       autoFocus
                     />
-                    <button onClick={saveEdit} className="px-2 py-1 rounded bg-black text-white text-xs">Save</button>
-                    <button onClick={cancelEdit} className="px-2 py-1 rounded border text-xs">Cancel</button>
+                    <button type="button" onClick={saveEdit} className="px-2 py-1 rounded bg-black text-white text-xs">
+                      Save
+                    </button>
+                    <button type="button" onClick={cancelEdit} className="px-2 py-1 rounded border text-xs">
+                      Cancel
+                    </button>
                   </div>
                 ) : (
                   <a className="block" href={`/class/${c.id}`}>
@@ -105,6 +113,7 @@ export default function AllClassesPanel() {
               {!isEditing && (
                 <div className="flex items-center gap-2">
                   <button
+                    type="button"
                     onClick={() => startEdit(c)}
                     className="p-2 rounded hover:bg-white"
                     title="Edit name"
@@ -112,6 +121,7 @@ export default function AllClassesPanel() {
                     <img src="/icons/pencil-edit.svg" alt="Edit" className="w-4 h-4" />
                   </button>
                   <button
+                    type="button"
                     onClick={() => remove(c.id)}
                     className="p-2 rounded hover:bg-white"
                     title="Delete class"
