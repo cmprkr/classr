@@ -15,9 +15,9 @@ export default function Home() {
           </div>
           <div className="text-4xl text-pink-400 mb-2">❝</div>
           <p className="text-lg font-semibold text-gray-600">
-            The only way to do great work is to love what you do.
+            Learn relentlessly. Knowledge is the foundation of freedom.
           </p>
-          <div className="text-xs text-pink-500 mt-2">—— Shared Inspiration</div>
+          <div className="text-xs text-pink-500 mt-2">- Charlie Kirk</div>
         </div>
       </section>
     </>
