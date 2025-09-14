@@ -1,23 +1,24 @@
-// src/components/LectureItem.tsx
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 export default function LectureItem({
   l,
+  classId,
   onDelete,
-  onToggled, // optional: parent can refetch after toggle
+  onToggled,
 }: {
   l: any;
+  classId: string;
   onDelete?: (id: string) => Promise<void> | void;
   onToggled?: (id: string, includeInMemory: boolean) => Promise<void> | void;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
-  const [includeInMemory, setIncludeInMemory] = useState<boolean>(
-    l?.includeInMemory ?? true
-  );
+  const [includeInMemory, setIncludeInMemory] = useState<boolean>(l?.includeInMemory ?? true);
   const [busy, setBusy] = useState(false);
 
   async function handleDelete() {
@@ -26,7 +27,6 @@ export default function LectureItem({
       await onDelete(l.id);
     } else {
       await fetch(`/api/lectures/${l.id}`, { method: "DELETE" });
-      // parent should re-fetch after deletion
     }
   }
 
@@ -52,43 +52,35 @@ export default function LectureItem({
     }
   }
 
+  // Clicking the CARD (not the action buttons) opens the settings view in the right pane.
+  function openSettings() {
+    router.push(`/class/${classId}?lecture=${encodeURIComponent(l.id)}`);
+  }
+
   return (
-    <div className="p-3 bg-gray-50 rounded-lg border hover:bg-gray-100">
-      {/* Header: left info, right actions */}
+    <div
+      className="p-3 bg-gray-50 rounded-lg border hover:bg-gray-100"
+      onClick={openSettings}
+      role="button"
+    >
+      {/* Header: left text, right actions */}
       <div className="flex items-center justify-between gap-3">
-        {/* Left: clickable info to expand/collapse */}
-        <button
-          type="button"
-          className="flex-1 text-left cursor-pointer"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          aria-controls={`lecture-${l.id}`}
-        >
-          <div className="text-sm font-semibold truncate text-gray-900">
-            {l.originalName}
-          </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold truncate text-gray-900">{l.originalName}</div>
           <div className="text-xs mt-1 text-gray-600">
             {(l.kind ?? "OTHER")} • Status: {l.status}
             {l.durationSec ? ` • ${l.durationSec}s` : ""}
           </div>
-        </button>
+        </div>
 
-        {/* Right: eye toggle (include) + delete; consistent position */}
-        <div className="flex items-center gap-2 flex-none">
-          {/* Include-in-memory toggle */}
+        {/* Actions: eye • trash • chevron */}
+        <div className="flex items-center gap-2 flex-none" onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleInclude();
-            }}
+            onClick={toggleInclude}
             className="p-2 rounded hover:bg-white"
             aria-pressed={includeInMemory}
-            title={
-              includeInMemory
-                ? "Included in AI memory (click to exclude)"
-                : "Excluded from AI memory (click to include)"
-            }
+            title={includeInMemory ? "Included in AI memory (click to exclude)" : "Excluded from AI memory (click to include)"}
             disabled={busy}
           >
             <img
@@ -98,28 +90,33 @@ export default function LectureItem({
             />
           </button>
 
-          {/* Delete */}
           <button
             type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleDelete();
-            }}
+            onClick={handleDelete}
             className="p-2 rounded hover:bg-white"
             title="Delete lecture"
           >
             <img src="/icons/trash.svg" alt="Delete" className="w-4 h-4" />
           </button>
+
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="p-2 rounded hover:bg-white"
+            title={open ? "Collapse" : "Expand"}
+          >
+            <img
+              src={open ? "/icons/chevron-down.svg" : "/icons/chevron-right.svg"}
+              alt=""
+              className="w-4 h-4"
+            />
+          </button>
         </div>
       </div>
 
-      {/* Expanded content */}
+      {/* Expanded content (opened by chevron only) */}
       {open && (
-        <div
-          id={`lecture-${l.id}`}
-          className="border-t p-3 space-y-2 bg-white mt-3"
-          onClick={(e) => e.stopPropagation()}
-        >
+        <div className="border-t p-3 space-y-2 bg-white mt-3" onClick={(e) => e.stopPropagation()}>
           {l.summaryJson && (
             <div>
               <button

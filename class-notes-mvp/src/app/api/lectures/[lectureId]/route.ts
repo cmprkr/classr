@@ -4,23 +4,15 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import fsp from "fs/promises";
 
-export async function PATCH(
-  req: Request,
-  ctx: { params: Promise<{ lectureId: string }> }
-) {
+export async function PATCH(req: Request, ctx: { params: Promise<{ lectureId: string }> }) {
   const { lectureId } = await ctx.params;
   const user = await requireUser();
 
   let body: any = {};
-  try {
-    body = await req.json();
-  } catch {
-    // allow empty body
-  }
+  try { body = await req.json(); } catch {}
 
-  const { descriptor, kind, includeInMemory } = body ?? {};
+  const { descriptor, kind, includeInMemory, originalName } = body ?? {};
 
-  // Ownership guard — relation is `clazz` in your schema
   const lec = await db.lecture.findFirst({
     where: { id: lectureId, clazz: { userId: user.id } },
     select: { id: true },
@@ -29,18 +21,15 @@ export async function PATCH(
 
   const data: any = {};
   if (typeof descriptor !== "undefined") data.descriptor = descriptor ?? undefined;
-  if (typeof kind !== "undefined") data.kind = kind ?? undefined; // enum key expected
+  if (typeof kind !== "undefined") data.kind = kind ?? undefined;
   if (typeof includeInMemory === "boolean") data.includeInMemory = includeInMemory;
+  if (typeof originalName !== "undefined") data.originalName = String(originalName).trim();
 
   if (Object.keys(data).length === 0) {
     return NextResponse.json({ error: "no changes" }, { status: 400 });
   }
 
-  const updated = await db.lecture.update({
-    where: { id: lectureId },
-    data,
-  });
-
+  const updated = await db.lecture.update({ where: { id: lectureId }, data });
   return NextResponse.json(updated);
 }
 

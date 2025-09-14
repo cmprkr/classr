@@ -1,14 +1,20 @@
-// src/app/class/[id]/page.tsx
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import Link from "next/link";
 import Chat from "@/components/ClassChat";
-import ClassLeftPane from "@/components/ClassLeftPane"; // ← new
+import ClassLeftPane from "@/components/ClassLeftPane";
+import LectureSettings from "@/components/LectureSettings";
 
 export const dynamic = "force-dynamic";
 
-export default async function ClassPage(props: { params: Promise<{ id: string }> }) {
+export default async function ClassPage(props: {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<{ lecture?: string }>;
+}) {
   const { id } = await props.params;
+  const searchParams = (await props.searchParams) ?? {};
+  const lectureId = searchParams.lecture;
+
   const user = await requireUser();
 
   const cls = await db.class.findFirst({
@@ -28,18 +34,30 @@ export default async function ClassPage(props: { params: Promise<{ id: string }>
     );
   }
 
+  // If ?lecture= is set, load that lecture for initialName
+  let targetName: string | null = null;
+  if (lectureId) {
+    const target = cls.lectures.find((x: any) => x.id === lectureId);
+    targetName = target?.originalName ?? null;
+  }
+
   return (
-    // full-height split panes; left = items list, right = content
     <main className="h-screen w-full overflow-hidden flex bg-white">
-      {/* Left: Use new client component that controls uploader visibility but keeps it at the top */}
       <ClassLeftPane classId={cls.id} lectures={cls.lectures as any[]} />
 
-      {/* Right: Content area (unchanged) */}
-      <section className="flex-1 overflow-hidden">
-        <div className="h-full mx-auto max-w-4xl p-6 flex flex-col">
-          <h1 className="text-2xl font-semibold text-black">{cls.name}</h1>
-          <div className="flex-1 p-4 rounded-2xl border bg-white overflow-y-auto">
-            <Chat classId={cls.id} />
+      {/* Right pane: show settings if a lecture is selected; otherwise chat */}
+      <section className="flex-1 min-w-0 overflow-hidden">
+        <div className="h-full flex flex-col">
+          <header className="px-4 py-3">
+            <h1 className="text-2xl font-semibold text-black">{cls.name}</h1>
+          </header>
+
+          <div className="flex-1 min-h-0">
+            {lectureId && targetName ? (
+              <LectureSettings classId={cls.id} lectureId={lectureId} initialName={targetName} />
+            ) : (
+              <Chat classId={cls.id} />
+            )}
           </div>
         </div>
       </section>
