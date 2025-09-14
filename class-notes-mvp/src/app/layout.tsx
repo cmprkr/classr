@@ -28,7 +28,10 @@ export default async function Root({ children }: { children: React.ReactNode }) 
 
   return (
     <html lang="en">
-      <body className="bg-white text-gray-800 h-screen overflow-hidden">
+      <body
+        suppressHydrationWarning
+        className="bg-white text-gray-800 h-screen overflow-hidden"
+      >
         <div className="flex h-full">
           <Sidebar displayName={displayName} isSignedIn={isSignedIn} userImage={userImage} />
           <main className="flex-1 flex overflow-hidden">{children}</main>
