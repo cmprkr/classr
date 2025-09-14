@@ -82,7 +82,7 @@ export default function AllClassesPanel() {
           return (
             <div
               key={c.id}
-              className="p-3 bg-gray-50 rounded-lg border hover:bg-gray-100 flex items-start justify-between gap-3"
+              className="p-3 bg-gray-50 rounded-lg border hover:bg-gray-100 flex items-center justify-between gap-3"
             >
               <div className="flex-1 min-w-0">
                 {isEditing ? (
@@ -111,7 +111,7 @@ export default function AllClassesPanel() {
               </div>
 
               {!isEditing && (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
                   <button
                     type="button"
                     onClick={() => startEdit(c)}
@@ -126,7 +126,7 @@ export default function AllClassesPanel() {
                     className="p-2 rounded hover:bg-white"
                     title="Delete class"
                   >
-                    <img src="/icons/folder-delete.svg" alt="Delete" className="w-4 h-4" />
+                    <img src="/icons/trash.svg" alt="Delete" className="w-4 h-4" />
                   </button>
                 </div>
               )}

@@ -110,6 +110,8 @@ model Lecture {
   chunks       Chunk[]
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  includeInMemory Boolean  @default(true) // <— NEW
 }
 
 model Chunk {

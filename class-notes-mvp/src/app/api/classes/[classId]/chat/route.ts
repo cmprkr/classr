@@ -1,3 +1,4 @@
+// src/app/api/classes/[classId]/chat/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
@@ -30,25 +31,25 @@ function toPreview(text: string, max = 280) {
 }
 
 async function backfillVectors(classId: string, maxToEmbed = 200) {
-  // Pull chunks for this class that are missing vectors
+  // `vectorJson` is a string column; treat empty string as "missing"
   const missing = await db.chunk.findMany({
-    where: { classId, OR: [{ vectorJson: "" }, { vectorJson: "" }] },
+    where: { classId, vectorJson: "" },
     orderBy: { createdAt: "desc" },
     take: maxToEmbed,
     select: { id: true, text: true },
   });
+
   const inputs = missing.map(m => (m.text || "").trim()).filter(Boolean);
   if (missing.length === 0 || inputs.length === 0) return 0;
 
   const emb = await openai.embeddings.create({ model: MODELS.embed, input: inputs });
-  // Update rows in the same order we built inputs
+
   let idx = 0;
   for (let i = 0; i < missing.length; i++) {
-    // Skip rows whose text was empty after trim (was filtered out)
     if (!missing[i].text || !missing[i].text.trim()) continue;
     await db.chunk.update({
       where: { id: missing[i].id },
-      data: { vectorJson: JSON.stringify(emb.data[idx++].embedding) },
+      data: { vectorJson: JSON.stringify((emb.data[idx++] as any).embedding) },
     });
   }
   return idx;
@@ -80,21 +81,23 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ classId: s
     // Ensure vectors exist for recent chunks (lazy backfill)
     await backfillVectors(classId, 300);
 
-    // Pull chunks (newest first)
+    // Pull chunks — ONLY from lectures included in memory
     const chunks = await db.chunk.findMany({
-      where: { classId },
+      where: {
+        classId,
+        lecture: { is: { includeInMemory: true } }, // relation filter
+      },
       orderBy: { createdAt: "desc" },
       take: 4000,
-      select: {
-        id: true, lectureId: true, source: true, startSec: true, endSec: true, text: true, vectorJson: true,
-        lecture: { select: { originalName: true } },
+      include: {
+        lecture: { select: { originalName: true } }, // expose `lecture` for display
       },
     });
 
     // Score
     const scored: Cit[] = [];
     for (const c of chunks) {
-      if (!c.vectorJson) continue;
+      if (!c.vectorJson) continue; // empty string = not embedded yet
       let v: number[] | null = null;
       try { v = JSON.parse(c.vectorJson as any); } catch {}
       if (!v) continue;
