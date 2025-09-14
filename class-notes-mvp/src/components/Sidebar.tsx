@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 type Klass = { id: string; name: string };
 
@@ -17,17 +17,66 @@ export default function Sidebar({
   const [collapsed, setCollapsed] = useState(false);
   const [classes, setClasses] = useState<Klass[]>([]);
   const [openAll, setOpenAll] = useState(true);
+  const [recActive, setRecActive] = useState(false); // recording indicator
   const pathname = usePathname();
+  const router = useRouter();
   const accountHref = isSignedIn ? "/account" : "/auth/signin";
 
-  const initial = useMemo(() => (displayName?.[0] || "U").toUpperCase(), [displayName]);
+  const initial = useMemo(
+    () => (displayName?.[0] || "U").toUpperCase(),
+    [displayName]
+  );
 
+  // Load classes for nav
   useEffect(() => {
     fetch("/api/classes")
       .then((r) => r.json())
       .then((data) => (Array.isArray(data) ? setClasses(data) : setClasses([])))
       .catch(() => {});
   }, []);
+
+  // Sync recording indicator with RecorderPanel (via CustomEvent + sessionStorage)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as boolean;
+      setRecActive(Boolean(detail));
+      try {
+        sessionStorage.setItem("recActive", detail ? "1" : "0");
+      } catch {}
+    };
+    const storageSync = () => {
+      try {
+        setRecActive(sessionStorage.getItem("recActive") === "1");
+      } catch {}
+    };
+    window.addEventListener("rec:active", handler as EventListener);
+    window.addEventListener("storage", storageSync);
+    storageSync(); // initialize from session
+    return () => {
+      window.removeEventListener("rec:active", handler as EventListener);
+      window.removeEventListener("storage", storageSync);
+    };
+  }, []);
+
+  function goToRecorder() {
+    // Case 1: already inside a class
+    const m = pathname?.match(/^\/class\/([^\/?#]+)/);
+    if (m) {
+      router.push(`/class/${m[1]}?record=1`);
+      return;
+    }
+    // Case 2: on dashboard
+    if (pathname === "/") {
+      router.push("/?record=1");
+      return;
+    }
+    // Case 3: fallback to first class if available
+    if (classes.length) {
+      router.push(`/class/${classes[0].id}?record=1`);
+    } else {
+      alert("Create a class first to attach your recording.");
+    }
+  }
 
   const W = collapsed ? "w-16" : "w-64";
   const label = (text: string) =>
@@ -52,15 +101,24 @@ export default function Sidebar({
         </div>
 
         <div className="flex-1 flex flex-col items-center justify-center gap-6 p-2">
-          <button className="p-2 rounded hover:bg-white" title="Start Recording">
+          {/* Start Recording */}
+          <button
+            className="relative p-2 rounded hover:bg-white cursor-pointer"
+            title="Start Recording"
+            onClick={goToRecorder}
+          >
             <img src="/icons/mic.svg" alt="" className="w-6 h-6" />
+            {recActive && (
+              <span className="absolute -right-1 -top-1 inline-block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
+            )}
           </button>
+
           <a href="/" className="p-2 rounded hover:bg-white" title="Dashboard">
             <img src="/icons/import.svg" alt="" className="w-6 h-6" />
           </a>
-          <button className="p-2 rounded hover:bg-white" title="Ask AI">
+          <a href="/" className="p-2 rounded hover:bg-white" title="Ask AI">
             <img src="/icons/chat.svg" alt="" className="w-6 h-6" />
-          </button>
+          </a>
           <a href="/" className="p-2 rounded hover:bg-white" title="All Classes">
             <img src="/icons/folder.svg" alt="" className="w-6 h-6" />
           </a>
@@ -99,13 +157,30 @@ export default function Sidebar({
         </button>
       </div>
 
-      <nav className="px-4 pt-4 flex flex-col gap-2 text-sm">
-        <button className="flex items-center gap-2 text-blue-600 font-medium" title="Not wired yet">
-          <img src="/icons/mic.svg" alt="" className="w-5 h-5" />
-          {label("Start Recording")}
-        </button>
+      {/* smaller vertical spacing between items */}
+      <nav className="px-4 pt-4 flex flex-col gap-1 text-sm">
+        {/* Start Recording */}
+        <div
+          className="relative flex items-center justify-between gap-2 rounded-lg px-2 py-1 text-blue-600 font-medium hover:bg-white cursor-pointer"
+          onClick={goToRecorder}
+          title="Start Recording"
+        >
+          <div className="flex items-center gap-2">
+            <img src="/icons/mic.svg" alt="" className="w-5 h-5" />
+            {label("Start Recording")}
+          </div>
+          {recActive && (
+            <span
+              aria-label="Recording in progress"
+              className="inline-block h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white"
+            />
+          )}
+        </div>
 
-        <a href="/" className="flex items-center gap-2 text-gray-700">
+        <a
+          href="/"
+          className="flex items-center gap-2 rounded-lg px-2 py-1 text-gray-700 hover:bg-white cursor-pointer"
+        >
           <img src="/icons/import.svg" alt="" className="w-5 h-5" />
           {label("Dashboard")}
         </a>
@@ -169,7 +244,9 @@ export default function Sidebar({
           )}
           <div>
             <div className="font-semibold text-black">{displayName}</div>
-            <div className="text-xs text-gray-500">{isSignedIn ? "Account" : "View / Sign in"}</div>
+            <div className="text-xs text-gray-500">
+              {isSignedIn ? "Account" : "View / Sign in"}
+            </div>
           </div>
         </a>
       </div>

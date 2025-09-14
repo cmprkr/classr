@@ -44,7 +44,6 @@ export default function ClassChat({ classId }: { classId: string }) {
   async function send() {
     const text = msg.trim();
     if (!text) return;
-
     setMsg("");
     setHistory((h) => [...h, { role: "user", content: text, createdAt: new Date().toISOString() }]);
     scrollToBottom("smooth");
@@ -78,35 +77,34 @@ export default function ClassChat({ classId }: { classId: string }) {
   }
 
   return (
-    // Fill entire column; remove outer card styling
-    <div className="flex h-full min-h-0 flex-col">
-      {/* Messages area — no border/rounded boxing */}
-      <div className="flex-1 min-h-0 overflow-auto px-4 pb-2">
-        <div className="space-y-3">
-          {history.map((m, i) => {
-            const isUser = m.role === "user";
-            return (
-              <div key={i} className={isUser ? "text-right" : ""}>
-                <div
-                  className={[
-                    "inline-block max-w-[80%] rounded-xl px-3 py-2 align-top",
-                    isUser ? "bg-white border text-black" : "bg-gray-100 text-black",
-                  ].join(" ")}
-                >
-                  <div className="whitespace-pre-wrap">{m.content}</div>
-                  {m.citations && (
-                    <div className="text-xs opacity-70 mt-1">Cites: {m.citations.length} chunks</div>
-                  )}
-                </div>
+    <div className="flex h-full flex-col">
+      {/* Scrollable messages: edge-to-edge (no rounded/border wrapper) */}
+      <div className="flex-1 overflow-auto space-y-3 p-3">
+        {history.map((m, i) => {
+          const isUser = m.role === "user";
+          return (
+            <div key={i} className={isUser ? "text-right" : ""}>
+              <div
+                className={[
+                  "inline-block max-w-[80%] rounded-xl px-3 py-2 align-top",
+                  isUser ? "bg-white border text-black" : "bg-gray-100 text-black",
+                ].join(" ")}
+              >
+                <div className="whitespace-pre-wrap">{m.content}</div>
+                {m.citations && (
+                  <div className="text-xs opacity-70 mt-1">
+                    Cites: {m.citations.length} chunks
+                  </div>
+                )}
               </div>
-            );
-          })}
-          <div ref={bottomRef} style={{ height: 1, scrollMarginBottom: footerH + 8 }} />
-        </div>
+            </div>
+          );
+        })}
+        <div ref={bottomRef} style={{ height: 1, scrollMarginBottom: footerH + 8 }} />
       </div>
 
-      {/* Composer — remove border lines so it feels full-bleed; keep slight padding */}
-      <div ref={footerRef} className="bg-white px-4 pb-4 pt-2">
+      {/* Sticky input bar */}
+      <div ref={footerRef} className="sticky bottom-0 bg-white pt-3 px-3">
         <div className="flex gap-2">
           <input
             value={msg}
