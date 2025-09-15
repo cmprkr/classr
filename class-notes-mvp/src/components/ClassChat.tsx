@@ -1,3 +1,4 @@
+// class-notes-mvp/src/components/ClassChat.tsx
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -11,7 +12,7 @@ export default function ClassChat({ classId }: { classId: string }) {
   const footerRef = useRef<HTMLDivElement>(null);
   const [footerH, setFooterH] = useState(0);
 
-  // measure sticky footer
+  // Measure sticky footer
   useEffect(() => {
     if (!footerRef.current) return;
     const el = footerRef.current;
@@ -107,9 +108,12 @@ export default function ClassChat({ classId }: { classId: string }) {
         <div ref={bottomRef} style={{ height: 1, scrollMarginBottom: footerH + 8 }} />
       </div>
 
-      {/* Sticky input */}
-      <div ref={footerRef} className="sticky bottom-0 bg-white px-4 pb-4 pt-2 border-t">
-        <div className="flex gap-2">
+      {/* Sticky input, centered vertically */}
+      <div
+        ref={footerRef}
+        className="sticky bottom-0 bg-white px-4 py-4 border-t flex items-center"
+      >
+        <div className="flex gap-2 w-full">
           <input
             value={msg}
             onChange={(e) => setMsg(e.target.value)}

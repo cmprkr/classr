@@ -1,6 +1,5 @@
 // src/components/LectureItem.tsx
 "use client";
-
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
@@ -8,28 +7,23 @@ export default function LectureItem({
   l,
   classId,
   currentUserId,
-  onDelete,
   onToggled,
 }: {
   l: any;
   classId: string;
   currentUserId?: string;
-  onDelete?: (id: string) => void | Promise<void>;
   onToggled?: (id: string, includeInMemory: boolean) => void | Promise<void>;
 }) {
   const router = useRouter();
   const search = useSearchParams();
-
   const [open, setOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const [toggling, setToggling] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-
   const isSynced = !!l?.syncKey;
   const isNotOwned = l?.userId && l.userId !== currentUserId;
   const includeInMemory = !!l?.includeInMemory;
-  const canDelete = !isSynced || (isSynced && l?.userId && l.userId === currentUserId);
+  const canEdit = !isSynced || (isSynced && l?.userId && l.userId === currentUserId);
 
   async function toggleInclude() {
     if (toggling) return;
@@ -59,21 +53,6 @@ export default function LectureItem({
       console.error("Toggle failed:", e.message);
     } finally {
       setToggling(false);
-    }
-  }
-
-  async function remove() {
-    if (deleting) return;
-    if (!confirm("Delete this item? This cannot be undone.")) return;
-    setDeleting(true);
-    try {
-      const r = await fetch(`/api/lectures/${l.id}`, { method: "DELETE" });
-      if (!r.ok) throw new Error("Delete failed");
-      if (onDelete) await onDelete(l.id);
-    } catch (e: any) {
-      console.error("Delete failed:", e.message);
-    } finally {
-      setDeleting(false);
     }
   }
 
@@ -120,7 +99,6 @@ export default function LectureItem({
             </div>
           )}
         </div>
-
         <div
           className="flex items-center gap-1"
           onClick={(e) => e.stopPropagation()}
@@ -142,19 +120,16 @@ export default function LectureItem({
               className="w-4 h-4"
             />
           </button>
-
-          {canDelete && (
+          {canEdit && (
             <button
               type="button"
-              onClick={remove}
-              disabled={deleting}
-              className={`p-2 rounded hover:bg-white ${deleting ? "opacity-60" : ""}`}
-              title="Delete item"
+              onClick={openSettingsPanel}
+              className="p-2 rounded hover:bg-white"
+              title="Lecture settings"
             >
-              <img src="/icons/trash.svg" alt="Delete" className="w-4 h-4" />
+              <img src="/icons/gear.svg" alt="Settings" className="w-4 h-4" />
             </button>
           )}
-
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
@@ -169,7 +144,6 @@ export default function LectureItem({
           </button>
         </div>
       </div>
-
       {open && (
         <div
           className={`border-x border-b p-3 space-y-2 ${isSynced ? syncedBg : normalBg}`}
@@ -195,7 +169,6 @@ export default function LectureItem({
               )}
             </div>
           )}
-
           {(l.transcript || l.textContent) && (
             <div>
               <button
@@ -216,7 +189,6 @@ export default function LectureItem({
               )}
             </div>
           )}
-
           {!l.summaryJson && !l.transcript && !l.textContent && (
             <div className="text-xs text-gray-500">No preview available.</div>
           )}

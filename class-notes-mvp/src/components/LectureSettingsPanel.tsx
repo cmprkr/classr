@@ -1,6 +1,5 @@
 // src/components/LectureSettingsPanel.tsx
 "use client";
-
 import { useEffect, useState } from "react";
 
 type Lec = { id: string; originalName: string; kind: string };
@@ -14,6 +13,7 @@ export default function LectureSettingsPanel({
 }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [kind, setKind] = useState("");
@@ -94,6 +94,25 @@ export default function LectureSettingsPanel({
     }
   }
 
+  async function remove() {
+    if (isLocked || deleting) return;
+    if (!confirm("Delete this lecture? This cannot be undone.")) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/lectures/${lectureId}`, { method: "DELETE" });
+      if (!r.ok) {
+        const t = await r.text();
+        throw new Error(t || "Delete failed");
+      }
+      onClose?.();
+    } catch (e: any) {
+      setError(`Delete failed: ${e.message}. If this keeps happening, ensure DELETE /api/lectures/[lectureId] is implemented.`);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <section className="relative h-full w-full overflow-hidden">
       <div className="absolute inset-0 bg-gradient-to-br from-indigo-200 via-fuchsia-200 to-pink-200" />
@@ -108,7 +127,6 @@ export default function LectureSettingsPanel({
                 </button>
               )}
             </div>
-
             {loading ? (
               <div className="text-sm text-gray-600">Loading…</div>
             ) : (
@@ -127,7 +145,6 @@ export default function LectureSettingsPanel({
                       : "This changes how the item appears in your list."}
                   </div>
                 </div>
-
                 <div>
                   <label className="block text-sm text-gray-700 mb-1">Type</label>
                   <select
@@ -151,9 +168,7 @@ export default function LectureSettingsPanel({
                       : "Select the type of this lecture or resource."}
                   </div>
                 </div>
-
                 {error && <div className="text-sm text-red-600">{error}</div>}
-
                 <div className="flex gap-2">
                   <button
                     onClick={save}
@@ -161,6 +176,13 @@ export default function LectureSettingsPanel({
                     className="px-4 py-2 rounded-lg bg-black text-white disabled:opacity-50"
                   >
                     {saving ? "Saving…" : "Save"}
+                  </button>
+                  <button
+                    onClick={remove}
+                    disabled={isLocked || deleting}
+                    className="px-4 py-2 rounded-lg bg-red-600 text-white disabled:opacity-50"
+                  >
+                    {deleting ? "Deleting…" : "Delete"}
                   </button>
                   {onClose && (
                     <button onClick={onClose} className="px-4 py-2 rounded-lg border">
