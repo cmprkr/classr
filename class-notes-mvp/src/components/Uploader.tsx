@@ -1,80 +1,157 @@
 //src/components/Uploader.tsx
 "use client";
 
-import { useRef, useState } from "react";
+import { useState, useRef } from "react";
+
+type FileWithType = {
+  file: File;
+  kind: string;
+};
 
 export default function Uploader({
   classId,
   onChanged,
-}: { classId: string; onChanged?: () => void }) {
-  const formRef = useRef<HTMLFormElement | null>(null);
-  const [status, setStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
+}: {
+  classId: string;
+  onChanged?: () => void;
+}) {
+  const [files, setFiles] = useState<FileWithType[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!formRef.current) return;
-    const fd = new FormData(formRef.current);
+  const resourceTypes = [
+    "LECTURE",
+    "SLIDESHOW",
+    "NOTES",
+    "HANDOUT",
+    "GRADED_ASSIGNMENT",
+    "UNGRADED_ASSIGNMENT",
+    "GRADED_TEST",
+    "OTHER",
+  ];
 
-    if (!(fd.getAll("file") || []).length && !String(fd.get("manualText") || "").trim()) {
-      setStatus("error");
-      return;
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const newFiles = Array.from(e.target.files).map((file) => ({
+        file,
+        kind: "LECTURE", // Default type
+      }));
+      setFiles((prev) => [...prev, ...newFiles]);
     }
+  };
 
-    setStatus("uploading");
-    const r = await fetch(`/api/classes/${classId}/upload`, { method: "POST", body: fd });
-    if (!r.ok) { setStatus("error"); return; }
-    setStatus("done");
-    onChanged?.();
-    formRef.current.reset();
-    setTimeout(() => setStatus("idle"), 700);
-  }
+  const removeFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const updateFileType = (index: number, kind: string) => {
+    setFiles((prev) =>
+      prev.map((fileWithType, i) =>
+        i === index ? { ...fileWithType, kind } : fileWithType
+      )
+    );
+  };
+
+  const handleUpload = async () => {
+    if (files.length === 0) return;
+
+    try {
+      for (const { file, kind } of files) {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("classId", classId);
+        formData.append(`kind_${file.name}`, kind);
+
+        const response = await fetch("/api/classes/" + classId + "/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          throw new Error(await response.text());
+        }
+      }
+
+      setFiles([]); // Clear files after successful upload
+      if (fileInputRef.current) fileInputRef.current.value = ""; // Reset input
+      if (onChanged) onChanged(); // Trigger parent callback
+    } catch (error) {
+      console.error("Upload failed:", error);
+      alert("Failed to upload files.");
+    }
+  };
+
+  const handleCancel = () => {
+    setFiles([]); // Clear selected files
+    if (fileInputRef.current) fileInputRef.current.value = ""; // Reset input
+  };
 
   return (
-    <form ref={formRef} onSubmit={submit} className="space-y-3 text-black">
-      <label
-        htmlFor="file"
-        className="block rounded-lg border border-dashed p-4 text-center bg-white text-black"
-      >
+    <div className="space-y-4">
+      <div>
         <input
-          id="file"
-          name="file"
           type="file"
           multiple
-          className="hidden"
-          accept="
-            audio/*,
-            application/pdf,
-            text/plain,.md,
-            application/vnd.openxmlformats-officedocument.wordprocessingml.document,
-            image/*"
+          ref={fileInputRef}
+          onChange={handleFileChange}
+          className="block w-full text-sm text-black file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border file:border-gray-300 file:text-sm file:text-black file:bg-gray-50 file:hover:bg-gray-100"
         />
-        <div className="font-medium text-black">Drag &amp; drop files here or choose files</div>
-        <div className="text-xs mt-1 text-black">
-          Supported: audio, images, PDF, TXT/MD, DOCX — or paste text below.
-        </div>
-      </label>
-
-      <input
-        name="descriptor"
-        placeholder="e.g., Week 3 slides (optimization intro)"
-        className="w-full rounded-lg border px-3 py-2 bg-white text-black placeholder-black"
-      />
-
-      <textarea
-        name="manualText"
-        placeholder="Paste an existing transcript or notes…"
-        rows={4}
-        className="w-full rounded-lg border px-3 py-2 bg-white text-black placeholder-black"
-      />
-
-      <div className="flex items-center justify-between">
-        <div className="text-sm">
-          Status: <span className="font-medium">{status}</span>
-        </div>
-        <button type="submit" className="rounded-lg bg-black px-4 py-2 text-white">
-          Upload
-        </button>
       </div>
-    </form>
+      {files.length > 0 && (
+        <div className="space-y-2">
+          {files.map((fileWithType, index) => (
+            <div
+              key={index}
+              className="flex items-center gap-2 p-2 border border-gray-300 rounded-lg bg-gray-50"
+            >
+              <span className="flex-1 text-sm text-black truncate">
+                {fileWithType.file.name}
+              </span>
+              <select
+                value={fileWithType.kind}
+                onChange={(e) => updateFileType(index, e.target.value)}
+                className="text-sm text-black border border-gray-300 rounded-lg px-2 py-1"
+              >
+                {resourceTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {type
+                      .toLowerCase()
+                      .replace(/_/g, " ")
+                      .replace(/\b\w/g, (c) => c.toUpperCase())}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => removeFile(index)}
+                className="text-sm text-red-600 hover:text-red-800"
+                title="Remove file"
+              >
+                <img
+                  src="/icons/trash.svg"
+                  alt="Remove"
+                  className="w-4 h-4"
+                />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {files.length > 0 && (
+        <div className="flex gap-2">
+          <button
+            onClick={handleUpload}
+            className="px-4 py-2 rounded-lg bg-black text-white hover:bg-gray-800 disabled:opacity-50"
+            disabled={files.length === 0}
+          >
+            Upload {files.length} File{files.length > 1 ? "s" : ""}
+          </button>
+          <button
+            onClick={handleCancel}
+            className="px-4 py-2 rounded-lg border border-gray-300 text-black hover:bg-gray-100"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

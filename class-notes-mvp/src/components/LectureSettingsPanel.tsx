@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 
-type Lec = { id: string; originalName: string };
+type Lec = { id: string; originalName: string; kind: string };
 
 export default function LectureSettingsPanel({
   lectureId,
@@ -16,15 +16,27 @@ export default function LectureSettingsPanel({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
+  const [kind, setKind] = useState("");
   const [isLocked, setIsLocked] = useState(false);
 
-  // Load lecture name
+  const resourceTypes = [
+    "LECTURE",
+    "SLIDESHOW",
+    "NOTES",
+    "HANDOUT",
+    "GRADED_ASSIGNMENT",
+    "UNGRADED_ASSIGNMENT",
+    "GRADED_TEST",
+    "OTHER",
+  ];
+
+  // Load lecture name and kind
   useEffect(() => {
     let mounted = true;
     (async () => {
       setError(null);
       setLoading(true);
-      setIsLocked(false); // Reset isLocked at start of fetch
+      setIsLocked(false);
       try {
         const r = await fetch(`/api/lectures/${lectureId}`);
         if (!r.ok) {
@@ -35,13 +47,17 @@ export default function LectureSettingsPanel({
               setError("This lecture is locked because you do not own it.");
               const data = await r.json().catch(() => ({}));
               if (data.originalName) setName(data.originalName);
+              if (data.kind) setKind(data.kind);
             }
           } else {
             throw new Error(errorText || "Unknown error");
           }
         } else {
           const data = (await r.json()) as Lec;
-          if (mounted) setName(data.originalName || "");
+          if (mounted) {
+            setName(data.originalName || "");
+            setKind(data.kind || "LECTURE");
+          }
         }
       } catch (e: any) {
         if (mounted && !isLocked) setError(`Failed to load lecture details: ${e.message}`);
@@ -52,7 +68,7 @@ export default function LectureSettingsPanel({
     return () => {
       mounted = false;
     };
-  }, [lectureId]); // Removed isLocked from dependencies
+  }, [lectureId]);
 
   async function save() {
     if (isLocked) return;
@@ -62,7 +78,7 @@ export default function LectureSettingsPanel({
       const r = await fetch(`/api/lectures/${lectureId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ originalName: name }),
+        body: JSON.stringify({ originalName: name, kind }),
       });
       if (!r.ok) {
         const t = await r.text();
@@ -71,7 +87,7 @@ export default function LectureSettingsPanel({
       onClose?.();
     } catch (e: any) {
       setError(
-        `Save failed: ${e.message}. If this keeps happening, ensure PATCH /api/lectures/[lectureId] accepts { originalName }.`
+        `Save failed: ${e.message}. If this keeps happening, ensure PATCH /api/lectures/[lectureId] accepts { originalName, kind }.`
       );
     } finally {
       setSaving(false);
@@ -109,6 +125,30 @@ export default function LectureSettingsPanel({
                     {isLocked
                       ? "You cannot edit this lecture because you do not own it."
                       : "This changes how the item appears in your list."}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm text-gray-700 mb-1">Type</label>
+                  <select
+                    value={kind}
+                    onChange={(e) => setKind(e.target.value)}
+                    disabled={isLocked}
+                    className="w-full rounded-lg border px-3 py-2 text-black disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  >
+                    {resourceTypes.map((type) => (
+                      <option key={type} value={type}>
+                        {type
+                          .toLowerCase()
+                          .replace(/_/g, " ")
+                          .replace(/\b\w/g, (c) => c.toUpperCase())}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="text-xs text-gray-500 mt-1">
+                    {isLocked
+                      ? "You cannot change the type because you do not own this lecture."
+                      : "Select the type of this lecture or resource."}
                   </div>
                 </div>
 

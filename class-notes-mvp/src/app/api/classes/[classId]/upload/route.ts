@@ -1,3 +1,4 @@
+// API route: POST /api/classes/[classId]/upload
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
@@ -7,17 +8,10 @@ import { chunkTranscript } from "@/lib/chunking";
 import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
+import { ResourceType } from "@prisma/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-type Kind =
-  | "LECTURE"
-  | "SLIDESHOW"
-  | "NOTES"
-  | "HOMEWORK_GRADED"
-  | "HOMEWORK_UNGRADED"
-  | "OTHER";
 
 async function safeEmbed(texts: string[]) {
   const inputs = texts.map((t) => (t ?? "").trim()).filter(Boolean);
@@ -30,13 +24,15 @@ async function guessKind(
   mime: string | undefined,
   descriptor: string | undefined,
   sampleText: string
-): Promise<Kind> {
+): Promise<ResourceType> {
   const prompt = `You are a classifier. Choose ONE label only from:
 - LECTURE
 - SLIDESHOW
 - NOTES
-- HOMEWORK_GRADED
-- HOMEWORK_UNGRADED
+- HANDOUT
+- GRADED_ASSIGNMENT
+- UNGRADED_ASSIGNMENT
+- GRADED_TEST
 - OTHER
 
 Given:
@@ -53,17 +49,30 @@ Respond with only the label.`;
     temperature: 0,
   });
   const raw = (r.choices[0].message.content || "OTHER").trim().toUpperCase();
-  const map: Record<string, Kind> = {
-    LECTURE: "LECTURE",
-    SLIDESHOW: "SLIDESHOW",
-    NOTES: "NOTES",
-    HOMEWORK_GRADED: "HOMEWORK_GRADED",
-    "HOMEWORK (GRADED)": "HOMEWORK_GRADED",
-    HOMEWORK_UNGRADED: "HOMEWORK_UNGRADED",
-    "HOMEWORK (UNGRADED)": "HOMEWORK_UNGRADED",
-    OTHER: "OTHER",
+  const validTypes: ResourceType[] = [
+    ResourceType.LECTURE,
+    ResourceType.SLIDESHOW,
+    ResourceType.NOTES,
+    ResourceType.HANDOUT,
+    ResourceType.GRADED_ASSIGNMENT,
+    ResourceType.UNGRADED_ASSIGNMENT,
+    ResourceType.GRADED_TEST,
+    ResourceType.OTHER,
+  ];
+  const map: Record<string, ResourceType> = {
+    LECTURE: ResourceType.LECTURE,
+    SLIDESHOW: ResourceType.SLIDESHOW,
+    NOTES: ResourceType.NOTES,
+    HANDOUT: ResourceType.HANDOUT,
+    GRADED_ASSIGNMENT: ResourceType.GRADED_ASSIGNMENT,
+    "GRADED ASSIGNMENT": ResourceType.GRADED_ASSIGNMENT,
+    UNGRADED_ASSIGNMENT: ResourceType.UNGRADED_ASSIGNMENT,
+    "UNGRADED ASSIGNMENT": ResourceType.UNGRADED_ASSIGNMENT,
+    GRADED_TEST: ResourceType.GRADED_TEST,
+    "GRADED TEST": ResourceType.GRADED_TEST,
+    OTHER: ResourceType.OTHER,
   };
-  return map[raw] ?? "OTHER";
+  return map[raw] ?? ResourceType.OTHER;
 }
 
 async function ocrImageWithVision(filePath: string): Promise<string> {
@@ -136,15 +145,15 @@ export async function POST(
     const lec = await db.lecture.create({
       data: {
         classId,
-        userId: user.id,                  // ✅ owner
+        userId: user.id,
         originalName: "Manual Text",
         descriptor,
-        kind: "NOTES",
+        kind: ResourceType.NOTES,
         status: "READY",
         textContent: manualText.trim(),
         transcript: manualText.trim(),
         mime: "text/plain",
-        syncKey: effectiveSyncKey,        // ✅ inherit sync
+        syncKey: effectiveSyncKey,
       },
     });
 
@@ -198,17 +207,23 @@ export async function POST(
     const dest = uploadsPath(`${Date.now()}_${filenameSafe}`);
     await fsp.writeFile(dest, buf);
     const mime = f.type || "";
+    const kindInput = form.get(`kind_${f.name}`) as string;
+    const validTypes = Object.values(ResourceType);
+    const kind: ResourceType = validTypes.includes(kindInput as ResourceType)
+      ? (kindInput as ResourceType)
+      : await guessKind(f.name || filenameSafe, mime, descriptor, "");
 
     const lec = await db.lecture.create({
       data: {
         classId,
-        userId: user.id,                  // ✅ owner
+        userId: user.id,
         originalName: f.name || path.basename(dest),
         filePath: dest,
         mime,
         descriptor,
+        kind,
         status: "PROCESSING",
-        syncKey: effectiveSyncKey,        // ✅ inherit sync
+        syncKey: effectiveSyncKey,
       },
     });
 
@@ -298,8 +313,6 @@ export async function POST(
       const manualText = (form.get("manualText") as string) || "";
       const manual = manualText?.trim() ? `\n\n[User Notes]\n${manualText.trim()}` : "";
       const sampleText = (transcriptText || textContent || "").slice(0, 4000) + manual;
-
-      const kind = await guessKind(lec.originalName, mime, descriptor, sampleText);
 
       // Summary (best-effort)
       let summaryContent = "";
