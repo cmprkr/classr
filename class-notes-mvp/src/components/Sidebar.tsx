@@ -18,12 +18,11 @@ export default function Sidebar({
   const [classes, setClasses] = useState<Klass[]>([]);
   const [openAll, setOpenAll] = useState(true);
   const [recActive, setRecActive] = useState(false);
-  const [guideLeft, setGuideLeft] = useState<number>(34); // sensible fallback
+  const [guideLeft, setGuideLeft] = useState<number>(34); // fallback
   const pathname = usePathname();
   const router = useRouter();
   const accountHref = isSignedIn ? "/account" : "/auth/signin";
 
-  // refs for precise alignment
   const chevronRef = useRef<HTMLImageElement | null>(null);
   const listWrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -32,7 +31,7 @@ export default function Sidebar({
     [displayName]
   );
 
-  // Load classes for nav
+  // Load classes
   useEffect(() => {
     fetch("/api/classes")
       .then((r) => r.json())
@@ -40,7 +39,7 @@ export default function Sidebar({
       .catch(() => {});
   }, []);
 
-  // Sync recording indicator
+  // Recording indicator sync
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail as boolean;
@@ -63,28 +62,21 @@ export default function Sidebar({
     };
   }, []);
 
-  // Precisely align vertical guide under the chevron
+  // Align vertical guide
   useEffect(() => {
     function calcGuideLeft() {
       const chevron = chevronRef.current;
       const wrap = listWrapRef.current;
       if (!chevron || !wrap) return;
-
       const chev = chevron.getBoundingClientRect();
       const w = wrap.getBoundingClientRect();
-      const center = chev.left + chev.width / 2 - w.left; // px from wrapper's left edge
-      // Clamp a bit to avoid negative values if layout shifts
+      const center = chev.left + chev.width / 2 - w.left;
       setGuideLeft(Math.max(0, Math.round(center)));
     }
-
-    // run after open/close toggle and on resize
     calcGuideLeft();
     const onResize = () => calcGuideLeft();
     window.addEventListener("resize", onResize);
-
-    // small microtask to catch any image layout settling
     const id = requestAnimationFrame(calcGuideLeft);
-
     return () => {
       window.removeEventListener("resize", onResize);
       cancelAnimationFrame(id);
@@ -117,9 +109,8 @@ export default function Sidebar({
     return (
       <aside
         className={`${W} transition-all duration-200 bg-gray-100 border-r border-gray-200 h-full flex flex-col`}
-        aria-label="Collapsed sidebar"
       >
-        <div className="h-12 flex items-center justify-center border-b">
+        <div className="h-14 flex items-center justify-center border-b px-2">
           <button
             onClick={() => setCollapsed(false)}
             className="text-gray-700 hover:text-black"
@@ -129,9 +120,8 @@ export default function Sidebar({
             <img src="/icons/chevron-right.svg" alt="expand" className="w-5 h-5" />
           </button>
         </div>
-
+        {/* collapsed nav */}
         <div className="flex-1 flex flex-col items-center justify-center gap-6 p-2">
-          {/* Start Recording */}
           <button
             className="relative p-2 rounded hover:bg-white cursor-pointer"
             title="Start Recording"
@@ -142,25 +132,11 @@ export default function Sidebar({
               <span className="absolute -right-1 -top-1 inline-block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
             )}
           </button>
-
           <a href="/" className="p-2 rounded hover:bg-white" title="Dashboard">
             <img src="/icons/book.svg" alt="" className="w-6 h-6" />
           </a>
           <a href="/" className="p-2 rounded hover:bg-white" title="All Classes">
             <img src="/icons/folder.svg" alt="" className="w-6 h-6" />
-          </a>
-        </div>
-
-        <div className="border-t pb-4 flex items-center justify-center">
-          <a href={accountHref} className="hover:opacity-90" aria-label={displayName}>
-            {userImage ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={userImage} alt="Avatar" className="w-8 h-8 rounded-full object-cover border" />
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-gray-300 grid place-items-center text-xs font-semibold text-black border">
-                {initial}
-              </div>
-            )}
           </a>
         </div>
       </aside>
@@ -172,7 +148,8 @@ export default function Sidebar({
     <aside
       className={`${W} transition-all duration-200 bg-gray-100 border-r border-gray-200 flex flex-col h-full overflow-hidden`}
     >
-      <div className="h-12 flex items-center justify-between border-b px-4">
+      {/* Top bar ONLY gets extra padding */}
+      <div className="flex items-center justify-between border-b px-6 py-3">
         <div className="text-2xl font-bold text-gray-800">PROD1</div>
         <button
           onClick={() => setCollapsed(true)}
@@ -184,9 +161,8 @@ export default function Sidebar({
         </button>
       </div>
 
-      {/* Main nav */}
+      {/* Main nav (unchanged spacing) */}
       <nav className="px-4 pt-4 flex flex-col gap-1 text-sm">
-        {/* Start Recording */}
         <div
           className="relative flex items-center justify-between gap-2 rounded-lg px-2 py-1 text-blue-600 font-medium hover:bg-white cursor-pointer"
           onClick={goToRecorder}
@@ -234,12 +210,10 @@ export default function Sidebar({
 
       {openAll && (
         <div ref={listWrapRef} className="mt-1 px-4 relative">
-          {/* Vertical guide positioned exactly under the chevron center */}
           <div
             className="absolute top-0 bottom-0 w-px bg-gray-300"
             style={{ left: `${guideLeft}px` }}
           />
-
           <ul className="pl-8 pr-2 space-y-1 overflow-y-auto max-h-[40vh]">
             {classes.map((c) => {
               const isActive = pathname === `/class/${c.id}`;
@@ -248,7 +222,7 @@ export default function Sidebar({
                   <a
                     href={`/class/${c.id}`}
                     title={c.name}
-                    className={`flex items-center gap-2 rounded-lg px-2 py-1 text-sm line-clamp-1 transition-colors ${
+                    className={`flex items-center gap-2 rounded-lg px-2 py-1 text-sm transition-colors ${
                       isActive
                         ? "bg-white text-blue-600 font-semibold"
                         : "text-gray-700 hover:bg-gray-200"
@@ -275,7 +249,6 @@ export default function Sidebar({
       <div className="mt-auto border-t px-4 pb-4 pt-2 text-sm">
         <a href={accountHref} className="flex items-center gap-2 hover:underline">
           {userImage ? (
-            // eslint-disable-next-line @next/next/no-img-element
             <img src={userImage} alt="Avatar" className="w-8 h-8 rounded-full object-cover border" />
           ) : (
             <div className="w-8 h-8 rounded-full bg-gray-300 grid place-items-center text-xs font-semibold text-black border">
