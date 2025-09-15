@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/auth";
 import Link from "next/link";
 import ClassRightPane from "@/components/ClassRightPane";
 import ClassLeftPane from "@/components/ClassLeftPane";
-import LectureSummaryPage from "@/components/LectureSummaryPage"; // Add this import
+// ⛔️ REMOVE: import LectureSummaryPage
 
 export const dynamic = "force-dynamic";
 
@@ -13,23 +13,11 @@ export default async function ClassPage(props: {
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const { id } = await props.params;
-  const sp = await props.searchParams; // Await searchParams
+  const sp = await props.searchParams;
   const user = await requireUser();
 
-  // Check if we should render the lecture summary page
-  const viewLecture = sp.view === "lecture" && sp.lectureId;
-  if (viewLecture) {
-    // For client-side rendering of summary, pass props to client component
-    // Note: Since LectureSummaryPage is "use client", we render it here conditionally
-    return (
-      <main className="h-screen w-full overflow-hidden bg-white">
-        <LectureSummaryPage lectureId={sp.lectureId!} classId={id} />
-      </main>
-    );
-  }
+  // ⛔️ REMOVE the early return that rendered <LectureSummaryPage/>
 
-  // Original class page logic (unchanged)
-  // Base class (owner's) with its own lectures & chats
   const cls = await db.class.findFirst({
     where: { id, userId: user.id },
     include: {
@@ -47,7 +35,7 @@ export default async function ClassPage(props: {
       </main>
     );
   }
-  // If syncing is enabled and a syncKey exists, pull ALL lectures with that key
+
   let mergedLectures = cls.lectures as any[];
   if (cls.syncEnabled && cls.syncKey) {
     const synced = await db.lecture.findMany({
@@ -69,26 +57,24 @@ export default async function ClassPage(props: {
         createdAt: true,
       },
     });
-    // Merge with local list, de-dupe by id, then sort desc by createdAt
     const byId = new Map<string, any>();
     for (const l of [...cls.lectures, ...synced]) byId.set(l.id, l);
     mergedLectures = Array.from(byId.values()).sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
   }
-  // Determine initial tab from searchParams
-  const lectureId = sp.lectureId || sp.lecture; // Support both keys
+
   const initialTab: "chat" | "record" | "class" =
     sp.tab === "class" ? "class" : sp.record === "1" ? "record" : "chat";
+
   return (
     <main className="h-screen w-full overflow-hidden flex bg-white">
-      {/* Left: Items (includes synced) */}
       <ClassLeftPane
         classId={cls.id}
         lectures={mergedLectures}
         currentUserId={user.id}
       />
-      {/* Right: Delegate all pane rendering to ClassRightPane */}
+      {/* ⬇️ remove border-l to avoid double-thick divider */}
       <section className="flex-1 overflow-hidden flex flex-col">
         <ClassRightPane
           classId={cls.id}

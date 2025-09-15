@@ -1,4 +1,4 @@
-//components/LectureSummaryPage.tsx
+// components/LectureSummaryPage.tsx
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -26,17 +26,13 @@ export default function LectureSummaryPage({ lectureId, classId }: { lectureId: 
       setLoading(true);
       try {
         const r = await fetch(`/api/lectures/${lectureId}`);
-        if (!r.ok) {
-          const errorText = await r.text();
-          throw new Error(errorText || "Failed to load lecture");
-        }
+        if (!r.ok) throw new Error((await r.text()) || "Failed to load lecture");
         const data = await r.json();
-        console.log("API Response:", data); // Debug: Log the full response
         if (mounted) {
           setLecture({
             id: data.id,
             originalName: data.originalName || "",
-            summaryJson: data.summaryJson || data.summary || "", // Handle potential alternative field
+            summaryJson: data.summaryJson || data.summary || "",
             classId: data.classId || classId,
           });
         }
@@ -46,51 +42,49 @@ export default function LectureSummaryPage({ lectureId, classId }: { lectureId: 
         if (mounted) setLoading(false);
       }
     })();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [lectureId, classId]);
 
   function goBack() {
     const currentParams = new URLSearchParams(searchParams.toString());
     currentParams.delete("view");
     currentParams.delete("lectureId");
-    const queryString = currentParams.toString();
-    router.push(queryString ? `/class/${classId}?${queryString}` : `/class/${classId}`);
+    const qs = currentParams.toString();
+    router.push(qs ? `/class/${classId}?${qs}` : `/class/${classId}`);
   }
 
   return (
-    <section className="relative h-full w-full overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-br from-indigo-200 via-fuchsia-200 to-pink-200" />
-      <div className="relative h-full w-full flex items-center justify-center p-6">
-        <div className="w-full max-w-2xl">
-          <div className="rounded-2xl bg-white shadow-xl ring-1 ring-black/5 p-6 sm:p-8 space-y-6">
-            <div className="flex items-center justify-between">
-              <h1 className="text-2xl font-semibold text-gray-900">
-                {lecture?.originalName || "Lecture Summary"}
-              </h1>
-              <button
-                onClick={goBack}
-                className="px-4 py-2 rounded-lg border text-black hover:bg-gray-100"
-              >
-                Back
-              </button>
-            </div>
-            {loading ? (
-              <div className="text-sm text-gray-600">Loading summary...</div>
-            ) : error ? (
-              <div className="text-sm text-red-600">{error}</div>
-            ) : !lecture?.summaryJson ? (
-              <div className="text-sm text-gray-600">No summary available for this lecture.</div>
-            ) : (
-              <div className="prose prose-sm max-w-none text-black leading-relaxed overflow-auto max-h-[calc(100vh-200px)] mt-4">
-                <ReactMarkdown rehypePlugins={[rehypeRaw]}>
-                  {lecture.summaryJson}
-                </ReactMarkdown>
-              </div>
-            )}
+    // Full-bleed white; right pane can be overlaid by the top-right tab toggle (OK per you)
+    <section className="h-full w-full bg-white flex flex-col">
+      {/* Header aligned with LEFT Back row (same padding + border) */}
+      <div className="px-4 py-4 border-b border-gray-200 flex items-center gap-3">
+        <button
+            onClick={goBack}
+            className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-800 hover:bg-gray-100 cursor-pointer" // ⬅️ added cursor-pointer
+            >
+            Back
+        </button>
+        {/* Title left-aligned, immediately to the right of Back */}
+        <h1 className="text-sm font-semibold text-gray-900 truncate">
+          {lecture?.originalName || "Lecture Summary"}
+        </h1>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-auto px-4 py-4">
+        {loading ? (
+          <div className="text-sm text-gray-600">Loading summary...</div>
+        ) : error ? (
+          <div className="text-sm text-red-600">{error}</div>
+        ) : !lecture?.summaryJson ? (
+          <div className="text-sm text-gray-600">No summary available for this lecture.</div>
+        ) : (
+          <div className="prose prose-sm max-w-none text-black leading-relaxed">
+            <ReactMarkdown rehypePlugins={[rehypeRaw]}>
+              {lecture.summaryJson}
+            </ReactMarkdown>
           </div>
-        </div>
+        )}
       </div>
     </section>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 type Klass = { id: string; name: string };
@@ -17,10 +17,15 @@ export default function Sidebar({
   const [collapsed, setCollapsed] = useState(false);
   const [classes, setClasses] = useState<Klass[]>([]);
   const [openAll, setOpenAll] = useState(true);
-  const [recActive, setRecActive] = useState(false); // recording indicator
+  const [recActive, setRecActive] = useState(false);
+  const [guideLeft, setGuideLeft] = useState<number>(34); // sensible fallback
   const pathname = usePathname();
   const router = useRouter();
   const accountHref = isSignedIn ? "/account" : "/auth/signin";
+
+  // refs for precise alignment
+  const chevronRef = useRef<HTMLImageElement | null>(null);
+  const listWrapRef = useRef<HTMLDivElement | null>(null);
 
   const initial = useMemo(
     () => (displayName?.[0] || "U").toUpperCase(),
@@ -35,7 +40,7 @@ export default function Sidebar({
       .catch(() => {});
   }, []);
 
-  // Sync recording indicator with RecorderPanel (via CustomEvent + sessionStorage)
+  // Sync recording indicator
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail as boolean;
@@ -51,26 +56,51 @@ export default function Sidebar({
     };
     window.addEventListener("rec:active", handler as EventListener);
     window.addEventListener("storage", storageSync);
-    storageSync(); // initialize from session
+    storageSync();
     return () => {
       window.removeEventListener("rec:active", handler as EventListener);
       window.removeEventListener("storage", storageSync);
     };
   }, []);
 
+  // Precisely align vertical guide under the chevron
+  useEffect(() => {
+    function calcGuideLeft() {
+      const chevron = chevronRef.current;
+      const wrap = listWrapRef.current;
+      if (!chevron || !wrap) return;
+
+      const chev = chevron.getBoundingClientRect();
+      const w = wrap.getBoundingClientRect();
+      const center = chev.left + chev.width / 2 - w.left; // px from wrapper's left edge
+      // Clamp a bit to avoid negative values if layout shifts
+      setGuideLeft(Math.max(0, Math.round(center)));
+    }
+
+    // run after open/close toggle and on resize
+    calcGuideLeft();
+    const onResize = () => calcGuideLeft();
+    window.addEventListener("resize", onResize);
+
+    // small microtask to catch any image layout settling
+    const id = requestAnimationFrame(calcGuideLeft);
+
+    return () => {
+      window.removeEventListener("resize", onResize);
+      cancelAnimationFrame(id);
+    };
+  }, [openAll]);
+
   function goToRecorder() {
-    // Case 1: already inside a class
     const m = pathname?.match(/^\/class\/([^\/?#]+)/);
     if (m) {
       router.push(`/class/${m[1]}?record=1`);
       return;
     }
-    // Case 2: on dashboard
     if (pathname === "/") {
       router.push("/?record=1");
       return;
     }
-    // Case 3: fallback to first class if available
     if (classes.length) {
       router.push(`/class/${classes[0].id}?record=1`);
     } else {
@@ -154,7 +184,7 @@ export default function Sidebar({
         </button>
       </div>
 
-      {/* smaller vertical spacing between items */}
+      {/* Main nav */}
       <nav className="px-4 pt-4 flex flex-col gap-1 text-sm">
         {/* Start Recording */}
         <div
@@ -183,50 +213,63 @@ export default function Sidebar({
         </a>
       </nav>
 
-      <div className="px-4 mt-6 text-xs uppercase text-gray-500">Folders</div>
-      <div className="mt-1 px-4">
-        <div className="flex items-start">
-          <button
-            className="inline-flex items-center gap-2 text-left text-sm text-gray-700 hover:underline"
-            onClick={() => setOpenAll((o) => !o)}
-            aria-expanded={openAll}
-          >
-            <img
-              src={openAll ? "/icons/chevron-down.svg" : "/icons/chevron-right.svg"}
-              alt=""
-              className="w-4 h-4"
-            />
-            <img src="/icons/folder.svg" alt="" className="w-4 h-4" />
-            {label("All Classes")}
-          </button>
-        </div>
+      {/* FOLDERS */}
+      <div className="px-4 pt-3">
+        <button
+          className="w-full flex items-center gap-2 rounded-lg px-2 py-1 text-gray-700 hover:bg-white text-sm"
+          onClick={() => setOpenAll((o) => !o)}
+          aria-expanded={openAll}
+          title="All Classes"
+        >
+          <img
+            ref={chevronRef}
+            src={openAll ? "/icons/chevron-down.svg" : "/icons/chevron-right.svg"}
+            alt=""
+            className="w-5 h-5"
+          />
+          <img src="/icons/folder.svg" alt="" className="w-5 h-5" />
+          <span className="font-medium">All Classes</span>
+        </button>
+      </div>
 
-        {openAll && (
-          <ul className="mt-2 pl-6 pr-1 space-y-1 overflow-y-auto max-h-[40vh]">
+      {openAll && (
+        <div ref={listWrapRef} className="mt-1 px-4 relative">
+          {/* Vertical guide positioned exactly under the chevron center */}
+          <div
+            className="absolute top-0 bottom-0 w-px bg-gray-300"
+            style={{ left: `${guideLeft}px` }}
+          />
+
+          <ul className="pl-8 pr-2 space-y-1 overflow-y-auto max-h-[40vh]">
             {classes.map((c) => {
               const isActive = pathname === `/class/${c.id}`;
               return (
-                <li key={c.id} className="pl-4">
+                <li key={c.id}>
                   <a
                     href={`/class/${c.id}`}
-                    className={`text-sm ${
-                      isActive
-                        ? "text-blue-600 font-semibold"
-                        : "text-gray-700 hover:text-gray-900 hover:underline"
-                    } line-clamp-1`}
                     title={c.name}
+                    className={`flex items-center gap-2 rounded-lg px-2 py-1 text-sm line-clamp-1 transition-colors ${
+                      isActive
+                        ? "bg-white text-blue-600 font-semibold"
+                        : "text-gray-700 hover:bg-gray-200"
+                    }`}
                   >
-                    {c.name}
+                    <img
+                      src="/icons/note.svg"
+                      alt=""
+                      className={`w-5 h-5 ${isActive ? "" : "opacity-60"}`}
+                    />
+                    <span>{c.name}</span>
                   </a>
                 </li>
               );
             })}
             {classes.length === 0 && (
-              <li className="text-sm text-gray-500 pl-4">No classes yet</li>
+              <li className="text-sm text-gray-500 px-2 py-1">No classes yet</li>
             )}
           </ul>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Profile footer */}
       <div className="mt-auto border-t px-4 pb-4 pt-2 text-sm">
