@@ -23,8 +23,11 @@ export default function ClassLeftPane({
     <aside className="w-96 shrink-0 border-r bg-white flex flex-col">
       {/* Back link */}
       <div className="p-4 border-b">
-        <Link href="/" className="text-sm text-black hover:underline">
-          &larr; Back
+        <Link
+          href="/"
+          className="inline-flex items-center px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-800 hover:bg-gray-100"
+        >
+        Back
         </Link>
       </div>
 

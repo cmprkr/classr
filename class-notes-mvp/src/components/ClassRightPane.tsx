@@ -20,19 +20,15 @@ export default function ClassRightPane({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-
   // Fix: Include "class" in the tab type
   const [tab, setTab] = useState<"chat" | "record" | "class">(initialTab);
   const [recActive, setRecActive] = useState(false);
-
   // Remember the last non-settings tab to return to when closing lecture settings
   const lastNonSettingsTabRef = useRef<"chat" | "record">(initialTab === "class" ? "chat" : initialTab);
-
   // Parse URL intent
   const urlWantsRecord = searchParams.get("record") === "1";
   const lectureId = searchParams.get("lectureId") || undefined;
   const urlWantsSettingsTab = searchParams.get("tab") === "class";
-
   // 1) React to URL changes
   useEffect(() => {
     if (lectureId) {
@@ -51,7 +47,6 @@ export default function ClassRightPane({
       setTab("chat");
     }
   }, [urlWantsRecord, lectureId, urlWantsSettingsTab]);
-
   // 2) Keep URL in sync when tab changes
   useEffect(() => {
     const current = new URLSearchParams(searchParams.toString());
@@ -59,7 +54,6 @@ export default function ClassRightPane({
     if (tab !== "class" && current.has("lectureId")) {
       current.delete("lectureId");
     }
-
     if (tab === "record") {
       current.set("record", "1");
       if (current.get("tab") === "class") current.delete("tab");
@@ -70,11 +64,9 @@ export default function ClassRightPane({
       current.delete("record");
       if (current.get("tab") === "class") current.delete("tab");
     }
-
     const qs = current.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }, [tab, router, pathname, searchParams]);
-
   // 3) Recording status indicator
   useEffect(() => {
     const handler = (e: Event) => {
@@ -87,19 +79,17 @@ export default function ClassRightPane({
     window.addEventListener("rec:active", handler as EventListener);
     return () => window.removeEventListener("rec:active", handler as EventListener);
   }, []);
-
   // Close lecture settings = return to previous tab
   const closeLecture = () => {
     setTab(lastNonSettingsTabRef.current || "chat");
   };
-
   return (
     <div className="relative h-full w-full">
       {/* Top-right toggle */}
       <div className="absolute right-4 top-4 z-30 rounded-lg border bg-white/80 backdrop-blur px-1 py-1 flex gap-1 shadow-sm">
         <button
           onClick={() => setTab("record")}
-          className={`px-3 py-1 rounded-md text-sm ${tab === "record" ? "bg-black text-white" : "hover:bg-white"}`}
+          className={`px-3 py-1 rounded-md text-sm cursor-pointer ${tab === "record" ? "bg-black text-white" : "text-black hover:bg-white"}`}
           title="Recording"
         >
           Recording
@@ -107,25 +97,23 @@ export default function ClassRightPane({
         </button>
         <button
           onClick={() => setTab("chat")}
-          className={`px-3 py-1 rounded-md text-sm ${tab === "chat" ? "bg-black text-white" : "hover:bg-white"}`}
+          className={`px-3 py-1 rounded-md text-sm cursor-pointer ${tab === "chat" ? "bg-black text-white" : "text-black hover:bg-white"}`}
           title="Class chat"
         >
           Chat
         </button>
         <button
           onClick={() => setTab("class")}
-          className={`px-3 py-1 rounded-md text-sm ${tab === "class" ? "bg-black text-white" : "hover:bg-white"}`}
+          className={`px-3 py-1 rounded-md text-sm cursor-pointer ${tab === "class" ? "bg-black text-white" : "text-black hover:bg-white"}`}
           title="Settings"
         >
           Settings
         </button>
       </div>
-
       {/* RECORDING view */}
       <div className={`${tab === "record" ? "block" : "hidden"} h-full w-full`}>
         <RecorderPanel />
       </div>
-
       {/* CHAT view */}
       <div className={`${tab === "chat" ? "block" : "hidden"} h-full w-full`}>
         <div className="px-4 pt-4">
@@ -135,7 +123,6 @@ export default function ClassRightPane({
           <Chat classId={classId} />
         </div>
       </div>
-
       {/* SETTINGS view (Class or Lecture) */}
       <div className={`${tab === "class" ? "block" : "hidden"} h-full w-full`}>
         {lectureId ? (
