@@ -1,12 +1,12 @@
 // src/components/ClassRightPane.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import RecorderPanel from "@/components/RecorderPanel";
 import Chat from "@/components/ClassChat";
 import LectureSettingsPanel from "@/components/LectureSettingsPanel";
-import ClassSettingsPanel from "src/components/ClassSettingsPanel";
+import ClassSettingsPanel from "@/components/ClassSettingsPanel";
 
 export default function ClassRightPane({
   classId,
@@ -21,40 +21,44 @@ export default function ClassRightPane({
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
+  // Fix: Include "class" in the tab type
   const [tab, setTab] = useState<"chat" | "record" | "class">(initialTab);
   const [recActive, setRecActive] = useState(false);
 
-  // Remember the last non-lecture tab to return to when closing lecture settings
-  const lastNonLectureTabRef = useRef<"chat" | "record" | "class">(initialTab);
+  // Remember the last non-settings tab to return to when closing lecture settings
+  const lastNonSettingsTabRef = useRef<"chat" | "record">(initialTab === "class" ? "chat" : initialTab);
 
   // Parse URL intent
   const urlWantsRecord = searchParams.get("record") === "1";
-  const lectureId = searchParams.get("lecture") || undefined;
-  const urlWantsClassTab = searchParams.get("tab") === "class"; // optional: ?tab=class to deep-link class settings
+  const lectureId = searchParams.get("lectureId") || undefined;
+  const urlWantsSettingsTab = searchParams.get("tab") === "class";
 
-  // 1) React to URL changes from sidebar (record) or lecture clicks (lecture)
+  // 1) React to URL changes
   useEffect(() => {
     if (lectureId) {
-      // When entering lecture settings, remember current non-lecture tab
-      if (tab) lastNonLectureTabRef.current = tab;
-      // Don't change `tab` — lecture settings is an overlay view
+      // When lectureId is present, force Settings tab and remember previous tab
+      if (tab !== "class") {
+        lastNonSettingsTabRef.current = tab;
+        setTab("class");
+      }
       return;
     }
     if (urlWantsRecord) {
       setTab("record");
-    } else if (urlWantsClassTab) {
+    } else if (urlWantsSettingsTab) {
       setTab("class");
     } else {
       setTab("chat");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlWantsRecord, lectureId, urlWantsClassTab]);
+  }, [urlWantsRecord, lectureId, urlWantsSettingsTab]);
 
-  // 2) Keep URL in sync when user clicks tabs (never set ?lecture= here)
+  // 2) Keep URL in sync when tab changes
   useEffect(() => {
     const current = new URLSearchParams(searchParams.toString());
-    // clear lecture param if switching tabs while a lecture was open
-    if (current.has("lecture")) current.delete("lecture");
+    // Clear lectureId when switching away from Settings tab
+    if (tab !== "class" && current.has("lectureId")) {
+      current.delete("lectureId");
+    }
 
     if (tab === "record") {
       current.set("record", "1");
@@ -69,10 +73,9 @@ export default function ClassRightPane({
 
     const qs = current.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+  }, [tab, router, pathname, searchParams]);
 
-  // 3) Recording status indicator (red dot in Sidebar)
+  // 3) Recording status indicator
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail as boolean;
@@ -85,18 +88,14 @@ export default function ClassRightPane({
     return () => window.removeEventListener("rec:active", handler as EventListener);
   }, []);
 
-  // Close lecture settings = clear ?lecture and return to last non-lecture tab
+  // Close lecture settings = return to previous tab
   const closeLecture = () => {
-    const current = new URLSearchParams(searchParams.toString());
-    current.delete("lecture");
-    const qs = current.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-    setTab(lastNonLectureTabRef.current || "chat");
+    setTab(lastNonSettingsTabRef.current || "chat");
   };
 
   return (
     <div className="relative h-full w-full">
-      {/* Top-right toggle (no lecture tab) */}
+      {/* Top-right toggle */}
       <div className="absolute right-4 top-4 z-30 rounded-lg border bg-white/80 backdrop-blur px-1 py-1 flex gap-1 shadow-sm">
         <button
           onClick={() => setTab("record")}
@@ -116,18 +115,18 @@ export default function ClassRightPane({
         <button
           onClick={() => setTab("class")}
           className={`px-3 py-1 rounded-md text-sm ${tab === "class" ? "bg-black text-white" : "hover:bg-white"}`}
-          title="Class settings"
+          title="Settings"
         >
-          Class
+          Settings
         </button>
       </div>
 
-      {/* RECORDING view (full-bleed) */}
+      {/* RECORDING view */}
       <div className={`${tab === "record" ? "block" : "hidden"} h-full w-full`}>
         <RecorderPanel />
       </div>
 
-      {/* CHAT view (full-bleed, no side gutters) */}
+      {/* CHAT view */}
       <div className={`${tab === "chat" ? "block" : "hidden"} h-full w-full`}>
         <div className="px-4 pt-4">
           {classTitle && <h1 className="text-2xl font-semibold text-black">{classTitle}</h1>}
@@ -137,17 +136,14 @@ export default function ClassRightPane({
         </div>
       </div>
 
-      {/* CLASS SETTINGS tab */}
+      {/* SETTINGS view (Class or Lecture) */}
       <div className={`${tab === "class" ? "block" : "hidden"} h-full w-full`}>
-        <ClassSettingsPanel classId={classId} />
-      </div>
-
-      {/* LECTURE SETTINGS overlay (no tab) */}
-      {lectureId && (
-        <div className="absolute inset-0 z-20">
+        {lectureId ? (
           <LectureSettingsPanel lectureId={lectureId} onClose={closeLecture} />
-        </div>
-      )}
+        ) : (
+          <ClassSettingsPanel classId={classId} />
+        )}
+      </div>
     </div>
   );
 }

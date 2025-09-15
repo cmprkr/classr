@@ -1,4 +1,4 @@
-//src/components/ClassLeftPane.tsx
+// src/components/ClassLeftPane.tsx
 "use client";
 
 import Link from "next/link";
@@ -28,20 +28,6 @@ export default function ClassLeftPane({
         </Link>
       </div>
 
-      {/* Uploader (collapsible) */}
-      {showUploader && (
-        <div className="p-4 border-b">
-          <h3 className="font-medium text-black mb-2">Add Material</h3>
-          <Uploader
-            classId={classId}
-            onChanged={() => {
-              // optionally auto-collapse after a successful upload
-              // setShowUploader(false);
-            }}
-          />
-        </div>
-      )}
-
       {/* Items header + Upload toggle button */}
       <div className="p-4 border-b flex items-center justify-between">
         <h2 className="text-sm font-semibold text-black">Items</h2>
@@ -58,6 +44,19 @@ export default function ClassLeftPane({
           />
         </button>
       </div>
+
+      {/* Uploader (collapsible, now under the header, above items) */}
+      {showUploader && (
+        <div className="p-4 border-b">
+          <Uploader
+            classId={classId}
+            onChanged={() => {
+              // optionally auto-collapse after a successful upload:
+              // setShowUploader(false);
+            }}
+          />
+        </div>
+      )}
 
       {/* Items list */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2">

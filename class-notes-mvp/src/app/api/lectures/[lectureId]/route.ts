@@ -5,13 +5,12 @@ import { requireUser } from "@/lib/auth";
 import fsp from "fs/promises";
 import { Prisma, ResourceType } from "@prisma/client";
 
-// --- GET: fetch a lecture (for settings panel) ---
 export async function GET(_req: Request, ctx: { params: Promise<{ lectureId: string }> }) {
   const { lectureId } = await ctx.params;
   const user = await requireUser();
 
   const lec = await db.lecture.findFirst({
-    where: { id: lectureId, clazz: { userId: user.id } },
+    where: { id: lectureId },
     select: {
       id: true,
       classId: true,
@@ -24,24 +23,32 @@ export async function GET(_req: Request, ctx: { params: Promise<{ lectureId: str
       includeInMemory: true,
       createdAt: true,
       updatedAt: true,
+      clazz: { select: { userId: true } },
     },
   });
 
-  if (!lec) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!lec) return NextResponse.json({ error: "Lecture not found" }, { status: 404 });
+
+  if (lec.clazz.userId !== user.id) {
+    return NextResponse.json(
+      { error: "You do not own this lecture", originalName: lec.originalName },
+      { status: 403 }
+    );
+  }
+
   return NextResponse.json(lec);
 }
 
-// --- PATCH: update descriptor/kind/name/includeInMemory ---
 export async function PATCH(req: Request, ctx: { params: Promise<{ lectureId: string }> }) {
   const { lectureId } = await ctx.params;
   const user = await requireUser();
 
   const body = await req.json();
   const {
-    descriptor,                 // string | null | undefined
-    kind,                       // ResourceType | string | null | undefined
-    originalName,               // string | null | undefined
-    includeInMemory,            // boolean | null | undefined (we'll ignore null)
+    descriptor,
+    kind,
+    originalName,
+    includeInMemory,
   }: {
     descriptor?: string | null;
     kind?: ResourceType | string | null;
@@ -49,12 +56,31 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ lectureId: st
     includeInMemory?: boolean | null;
   } = body ?? {};
 
-  const lec = await db.lecture.findFirst({
-    where: { id: lectureId, clazz: { userId: user.id } },
+  // Find lecture: either in user's class or accessible via syncKey
+  const userClasses = await db.class.findMany({
+    where: { userId: user.id },
+    select: { id: true, syncKey: true },
   });
-  if (!lec) return NextResponse.json({ error: "not found" }, { status: 404 });
+  const userClassIds = userClasses.map(c => c.id);
+  const userSyncKeys = userClasses.map(c => c.syncKey).filter((key): key is string => !!key);
 
-  // Normalize/validate enum
+  const lec = await db.lecture.findFirst({
+    where: {
+      id: lectureId,
+      OR: [
+        { classId: { in: userClassIds } }, // Owned or in user's class
+        { syncKey: { in: userSyncKeys } }, // Imported via syncKey
+      ],
+    },
+    include: { clazz: { select: { userId: true } } },
+  });
+
+  if (!lec) return NextResponse.json({ error: "Not found or not in your class" }, { status: 404 });
+
+  if (lec.clazz.userId !== user.id && (descriptor !== undefined || kind !== undefined || originalName !== undefined)) {
+    return NextResponse.json({ error: "Cannot modify metadata of non-owned lecture" }, { status: 403 });
+  }
+
   let kindEnum: ResourceType | undefined;
   if (typeof kind === "string") {
     const norm = kind.toUpperCase().trim();
@@ -70,12 +96,13 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ lectureId: st
     kindEnum = kind as ResourceType;
   }
 
-  // Build update payload (only set fields that were provided)
   const data: Prisma.LectureUpdateInput = {};
-  if (descriptor !== undefined) data.descriptor = descriptor;                 // allow null to clear
-  if (originalName !== undefined && originalName !== null) data.originalName = originalName;
-  if (typeof includeInMemory === "boolean") data.includeInMemory = includeInMemory; // <-- fix: boolean only
-  if (kindEnum !== undefined) data.kind = kindEnum;
+  if (lec.clazz.userId === user.id) {
+    if (descriptor !== undefined) data.descriptor = descriptor;
+    if (originalName !== undefined && originalName !== null) data.originalName = originalName;
+    if (kindEnum !== undefined) data.kind = kindEnum;
+  }
+  if (typeof includeInMemory === "boolean") data.includeInMemory = includeInMemory;
 
   const updated = await db.lecture.update({
     where: { id: lectureId },
@@ -94,7 +121,6 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ lectureId: st
   return NextResponse.json(updated);
 }
 
-// --- DELETE: remove lecture and its chunks (and file if present) ---
 export async function DELETE(_req: Request, ctx: { params: Promise<{ lectureId: string }> }) {
   const { lectureId } = await ctx.params;
   const user = await requireUser();

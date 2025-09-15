@@ -7,16 +7,15 @@ export async function POST(req: Request, ctx: { params: Promise<{ classId: strin
   const { classId } = await ctx.params;
   const user = await requireUser();
   const { syncKey } = (await req.json()) as { syncKey?: string };
-
   if (!syncKey) return NextResponse.json({ error: "syncKey required" }, { status: 400 });
 
   const clazz = await db.class.findFirst({ where: { id: classId, userId: user.id } });
   if (!clazz) return NextResponse.json({ error: "class not found" }, { status: 404 });
 
-  // Set the syncKey on all existing lectures in this class
+  // Update existing lectures in this class with syncKey
   await db.lecture.updateMany({
     where: { classId },
-    data: { syncKey },
+    data: { syncKey, includeInMemory: true }, // Ensure owned lectures are included in AI memory
   });
 
   return NextResponse.json({ ok: true });

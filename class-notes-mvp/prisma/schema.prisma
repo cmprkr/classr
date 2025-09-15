@@ -122,6 +122,7 @@ model Lecture {
   // syncing + memory
   syncKey         String?
   includeInMemory Boolean @default(true)
+  includeInMemoryUser    Json?       // New: { [userId: string]: boolean } for user-specific inclusion
 
   @@index([syncKey])
   @@index([createdAt])

@@ -7,7 +7,7 @@ import { useState } from "react";
 export default function LectureItem({
   l,
   classId,
-  currentUserId,               // ← optional owner check
+  currentUserId,
   onDelete,
   onToggled,
 }: {
@@ -27,28 +27,36 @@ export default function LectureItem({
   const [deleting, setDeleting] = useState(false);
 
   const isSynced = !!l?.syncKey;
+  const isNotOwned = l?.userId && l.userId !== currentUserId;
   const includeInMemory = !!l?.includeInMemory;
-
-  // Delete is allowed if:
-  // - not synced, OR
-  // - synced but uploaded by the current user
   const canDelete = !isSynced || (isSynced && l?.userId && l.userId === currentUserId);
 
   async function toggleInclude() {
     if (toggling) return;
     setToggling(true);
     try {
+      console.log("Toggling lecture:", { id: l.id, classId: l.classId, userId: l.userId, syncKey: l.syncKey, includeInMemory });
       const res = await fetch(`/api/lectures/${l.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ includeInMemory: !includeInMemory }),
       });
-      if (!res.ok) throw new Error("Toggle failed");
-      if (onToggled) await onToggled(l.id, !includeInMemory);
-      // optimistic local flip
-      l.includeInMemory = !includeInMemory;
-    } catch {
-      // optional: toast
+      if (!res.ok) {
+        let error = "Toggle failed";
+        try {
+          const errorData = await res.json();
+          error = errorData.error || error;
+        } catch {
+          console.error("Response body invalid:", await res.text());
+        }
+        throw new Error(error);
+      }
+      const updated = await res.json();
+      console.log("Toggle response:", updated);
+      l.includeInMemory = updated.includeInMemory;
+      if (onToggled) await onToggled(l.id, updated.includeInMemory);
+    } catch (e: any) {
+      console.error("Toggle failed:", e.message);
     } finally {
       setToggling(false);
     }
@@ -62,17 +70,16 @@ export default function LectureItem({
       const r = await fetch(`/api/lectures/${l.id}`, { method: "DELETE" });
       if (!r.ok) throw new Error("Delete failed");
       if (onDelete) await onDelete(l.id);
-    } catch {
-      // optional: toast
+    } catch (e: any) {
+      console.error("Delete failed:", e.message);
     } finally {
       setDeleting(false);
     }
   }
 
   function openSettingsPanel() {
-    // Clicking the row opens lecture settings in the right panel
     const params = new URLSearchParams(search?.toString() || "");
-    params.set("panel", "lecture-settings");
+    params.set("tab", "class");
     params.set("lectureId", l.id);
     router.push(`/class/${classId}?${params.toString()}`);
   }
@@ -85,36 +92,39 @@ export default function LectureItem({
 
   return (
     <div className="rounded-lg overflow-hidden">
-      {/* Header row */}
       <div
         className={`${cardBase} ${isSynced ? syncedBg : normalBg}`}
         onClick={openSettingsPanel}
         title={isSynced ? "Synced item" : undefined}
       >
-        {/* Left: title + meta */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <div className="text-sm font-semibold truncate text-gray-900">
-              {l.originalName}
-            </div>
-            {isSynced && (
-              <span className="shrink-0 rounded-full text-[10px] px-2 py-0.5 bg-pink-100 text-pink-700 border border-pink-200">
-                Synced
-              </span>
-            )}
+          <div className="text-sm font-semibold truncate text-gray-900">
+            {l.originalName}
           </div>
           <div className="text-xs mt-1 text-gray-600">
             {(l.kind ?? "OTHER")} • Status: {l.status}
             {l.durationSec ? ` • ${l.durationSec}s` : ""}
           </div>
+          {(isSynced || isNotOwned) && (
+            <div className="text-xs mt-1 text-gray-600 flex gap-2">
+              {isSynced && (
+                <span className="inline-block rounded-full text-[10px] px-2 py-0.5 bg-pink-100 text-pink-700 border border-pink-200">
+                  Synced
+                </span>
+              )}
+              {isNotOwned && (
+                <span className="inline-block rounded-full text-[10px] px-2 py-0.5 bg-blue-100 text-blue-700 border border-blue-200">
+                  Imported
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Right controls */}
         <div
           className="flex items-center gap-1"
-          onClick={(e) => e.stopPropagation()} // don’t navigate when pressing buttons
+          onClick={(e) => e.stopPropagation()}
         >
-          {/* Eye toggle */}
           <button
             type="button"
             onClick={toggleInclude}
@@ -133,7 +143,6 @@ export default function LectureItem({
             />
           </button>
 
-          {/* Trash (hidden if synced and not owned by current user) */}
           {canDelete && (
             <button
               type="button"
@@ -146,7 +155,6 @@ export default function LectureItem({
             </button>
           )}
 
-          {/* Chevron to expand inline preview */}
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
@@ -162,10 +170,9 @@ export default function LectureItem({
         </div>
       </div>
 
-      {/* Expanded content (clean, consistent layout) */}
       {open && (
         <div
-          className="border-x border-b p-3 space-y-2 bg-white"
+          className={`border-x border-b p-3 space-y-2 ${isSynced ? syncedBg : normalBg}`}
           onClick={(e) => e.stopPropagation()}
         >
           {l.summaryJson && (
