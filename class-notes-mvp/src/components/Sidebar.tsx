@@ -1,5 +1,4 @@
 "use client";
-
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
@@ -22,10 +21,8 @@ export default function Sidebar({
   const pathname = usePathname();
   const router = useRouter();
   const accountHref = isSignedIn ? "/account" : "/auth/signin";
-
   const chevronRef = useRef<HTMLImageElement | null>(null);
   const listWrapRef = useRef<HTMLDivElement | null>(null);
-
   const initial = useMemo(
     () => (displayName?.[0] || "U").toUpperCase(),
     [displayName]
@@ -51,7 +48,7 @@ export default function Sidebar({
     const storageSync = () => {
       try {
         setRecActive(sessionStorage.getItem("recActive") === "1");
-      } catch {}
+      } catch {};
     };
     window.addEventListener("rec:active", handler as EventListener);
     window.addEventListener("storage", storageSync);
@@ -160,7 +157,6 @@ export default function Sidebar({
           <img src="/icons/chevron-left.svg" alt="collapse" className="w-5 h-5" />
         </button>
       </div>
-
       {/* Main nav (unchanged spacing) */}
       <nav className="px-4 pt-4 flex flex-col gap-1 text-sm">
         <div
@@ -179,7 +175,6 @@ export default function Sidebar({
             />
           )}
         </div>
-
         <a
           href="/"
           className="flex items-center gap-2 rounded-lg px-2 py-1 text-gray-700 hover:bg-white cursor-pointer"
@@ -188,7 +183,6 @@ export default function Sidebar({
           {label("Dashboard")}
         </a>
       </nav>
-
       {/* FOLDERS */}
       <div className="px-4 pt-3">
         <button
@@ -207,7 +201,6 @@ export default function Sidebar({
           <span className="font-medium">All Classes</span>
         </button>
       </div>
-
       {openAll && (
         <div ref={listWrapRef} className="mt-1 px-4 relative">
           <div
@@ -228,11 +221,6 @@ export default function Sidebar({
                         : "text-gray-700 hover:bg-gray-200"
                     }`}
                   >
-                    <img
-                      src="/icons/note.svg"
-                      alt=""
-                      className={`w-5 h-5 ${isActive ? "" : "opacity-60"}`}
-                    />
                     <span>{c.name}</span>
                   </a>
                 </li>
@@ -244,7 +232,6 @@ export default function Sidebar({
           </ul>
         </div>
       )}
-
       {/* Profile footer */}
       <div className="mt-auto border-t px-4 pb-4 pt-2 text-sm">
         <a href={accountHref} className="flex items-center gap-2 hover:underline">
