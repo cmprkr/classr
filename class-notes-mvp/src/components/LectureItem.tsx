@@ -1,4 +1,4 @@
-// src/components/LectureItem.tsx
+// components/LectureItem.tsx
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
@@ -63,6 +63,13 @@ export default function LectureItem({
     router.push(`/class/${classId}?${params.toString()}`);
   }
 
+  function openSummaryPage() {
+    const params = new URLSearchParams(search?.toString() || "");
+    params.set("view", "lecture");
+    params.set("lectureId", l.id);
+    router.push(`/class/${classId}?${params.toString()}`);
+  }
+
   const cardBase =
     "p-3 rounded-lg border flex items-start justify-between gap-3 cursor-pointer";
   const syncedBg =
@@ -73,7 +80,7 @@ export default function LectureItem({
     <div className="rounded-lg overflow-hidden">
       <div
         className={`${cardBase} ${isSynced ? syncedBg : normalBg}`}
-        onClick={openSettingsPanel}
+        onClick={openSummaryPage}
         title={isSynced ? "Synced item" : undefined}
       >
         <div className="flex-1 min-w-0">

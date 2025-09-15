@@ -8,7 +8,6 @@ import { Prisma, ResourceType } from "@prisma/client";
 export async function GET(_req: Request, ctx: { params: Promise<{ lectureId: string }> }) {
   const { lectureId } = await ctx.params;
   const user = await requireUser();
-
   const lec = await db.lecture.findFirst({
     where: { id: lectureId },
     select: {
@@ -24,25 +23,22 @@ export async function GET(_req: Request, ctx: { params: Promise<{ lectureId: str
       createdAt: true,
       updatedAt: true,
       clazz: { select: { userId: true } },
+      summaryJson: true, // Added to include summaryJson
     },
   });
-
   if (!lec) return NextResponse.json({ error: "Lecture not found" }, { status: 404 });
-
   if (lec.clazz.userId !== user.id) {
     return NextResponse.json(
       { error: "You do not own this lecture", originalName: lec.originalName },
       { status: 403 }
     );
   }
-
   return NextResponse.json(lec);
 }
 
 export async function PATCH(req: Request, ctx: { params: Promise<{ lectureId: string }> }) {
   const { lectureId } = await ctx.params;
   const user = await requireUser();
-
   const body = await req.json();
   const {
     descriptor,
@@ -55,7 +51,6 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ lectureId: st
     originalName?: string | null;
     includeInMemory?: boolean | null;
   } = body ?? {};
-
   // Find lecture: either in user's class or accessible via syncKey
   const userClasses = await db.class.findMany({
     where: { userId: user.id },
@@ -63,7 +58,6 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ lectureId: st
   });
   const userClassIds = userClasses.map(c => c.id);
   const userSyncKeys = userClasses.map(c => c.syncKey).filter((key): key is string => !!key);
-
   const lec = await db.lecture.findFirst({
     where: {
       id: lectureId,
@@ -74,13 +68,10 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ lectureId: st
     },
     include: { clazz: { select: { userId: true } } },
   });
-
   if (!lec) return NextResponse.json({ error: "Not found or not in your class" }, { status: 404 });
-
   if (lec.clazz.userId !== user.id && (descriptor !== undefined || kind !== undefined || originalName !== undefined)) {
     return NextResponse.json({ error: "Cannot modify metadata of non-owned lecture" }, { status: 403 });
   }
-
   let kindEnum: ResourceType | undefined;
   if (typeof kind === "string") {
     const norm = kind.toUpperCase().trim();
@@ -95,7 +86,6 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ lectureId: st
   } else if (kind) {
     kindEnum = kind as ResourceType;
   }
-
   const data: Prisma.LectureUpdateInput = {};
   if (lec.clazz.userId === user.id) {
     if (descriptor !== undefined) data.descriptor = descriptor;
@@ -103,7 +93,6 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ lectureId: st
     if (kindEnum !== undefined) data.kind = kindEnum;
   }
   if (typeof includeInMemory === "boolean") data.includeInMemory = includeInMemory;
-
   const updated = await db.lecture.update({
     where: { id: lectureId },
     data,
@@ -117,19 +106,16 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ lectureId: st
       updatedAt: true,
     },
   });
-
   return NextResponse.json(updated);
 }
 
 export async function DELETE(_req: Request, ctx: { params: Promise<{ lectureId: string }> }) {
   const { lectureId } = await ctx.params;
   const user = await requireUser();
-
   const lec = await db.lecture.findFirst({
     where: { id: lectureId, clazz: { userId: user.id } },
   });
   if (!lec) return NextResponse.json({ ok: true });
-
   if (lec.filePath) {
     await fsp.unlink(lec.filePath).catch(() => {});
   }
@@ -137,6 +123,5 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ lectureId: 
     db.chunk.deleteMany({ where: { lectureId } }),
     db.lecture.delete({ where: { id: lectureId } }),
   ]);
-
   return NextResponse.json({ ok: true });
 }
