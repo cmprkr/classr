@@ -114,10 +114,7 @@ export default function Sidebar({
           </button>
 
           <a href="/" className="p-2 rounded hover:bg-white" title="Dashboard">
-            <img src="/icons/import.svg" alt="" className="w-6 h-6" />
-          </a>
-          <a href="/" className="p-2 rounded hover:bg-white" title="Ask AI">
-            <img src="/icons/chat.svg" alt="" className="w-6 h-6" />
+            <img src="/icons/book.svg" alt="" className="w-6 h-6" />
           </a>
           <a href="/" className="p-2 rounded hover:bg-white" title="All Classes">
             <img src="/icons/folder.svg" alt="" className="w-6 h-6" />
@@ -181,7 +178,7 @@ export default function Sidebar({
           href="/"
           className="flex items-center gap-2 rounded-lg px-2 py-1 text-gray-700 hover:bg-white cursor-pointer"
         >
-          <img src="/icons/import.svg" alt="" className="w-5 h-5" />
+          <img src="/icons/book.svg" alt="" className="w-5 h-5" />
           {label("Dashboard")}
         </a>
       </nav>

@@ -8,11 +8,18 @@ export const dynamic = "force-dynamic";
 
 export default async function ClassPage(props: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ record?: string }>;
+  searchParams?: Promise<{ record?: string; lecture?: string; tab?: string }>;
 }) {
   const { id } = await props.params;
   const sp = (await props.searchParams) ?? {};
-  const showRecorder = sp.record === "1";
+
+  // Decide initialTab (only chat/record/class)
+  let initialTab: "chat" | "record" | "class" = "chat";
+  if (sp.record === "1") {
+    initialTab = "record";
+  } else if (sp.tab === "class") {
+    initialTab = "class";
+  }
 
   const user = await requireUser();
 
@@ -34,15 +41,12 @@ export default async function ClassPage(props: {
   }
 
   return (
-    // full-height split: left = list; right = content (no max-width to avoid gutters)
     <main className="h-screen w-full overflow-hidden flex bg-white">
       <ClassLeftPane classId={cls.id} lectures={cls.lectures as any[]} />
-
-      {/* Right: edge-to-edge content with toggle between Recording/Chat */}
       <section className="relative flex-1 overflow-hidden">
         <ClassRightPane
           classId={cls.id}
-          initialTab={showRecorder ? "record" : "chat"}
+          initialTab={initialTab}
           classTitle={cls.name}
         />
       </section>

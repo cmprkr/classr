@@ -1,13 +1,15 @@
+// src/components/AllClassesPanel.tsx
 "use client";
+
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type Klass = { id: string; name: string; createdAt: string };
 
 export default function AllClassesPanel() {
+  const router = useRouter();
   const [classes, setClasses] = useState<Klass[]>([]);
   const [name, setName] = useState("");
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingName, setEditingName] = useState("");
 
   async function load() {
     const r = await fetch("/api/classes");
@@ -32,30 +34,8 @@ export default function AllClassesPanel() {
     load();
   }
 
-  function startEdit(c: Klass) {
-    setEditingId(c.id);
-    setEditingName(c.name);
-  }
-
-  async function saveEdit() {
-    if (!editingId) return;
-    const newName = editingName.trim();
-    if (!newName) return;
-    const r = await fetch(`/api/classes/${editingId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newName }),
-    });
-    if (r.ok) {
-      setEditingId(null);
-      setEditingName("");
-      load();
-    }
-  }
-
-  function cancelEdit() {
-    setEditingId(null);
-    setEditingName("");
+  function goToSettings(id: string) {
+    router.push(`/class/${id}?tab=class`);
   }
 
   return (
@@ -77,62 +57,41 @@ export default function AllClassesPanel() {
       </div>
 
       <div className="space-y-2">
-        {classes.map((c) => {
-          const isEditing = editingId === c.id;
-          return (
-            <div
-              key={c.id}
-              className="p-3 bg-gray-50 rounded-lg border hover:bg-gray-100 flex items-center justify-between gap-3"
-            >
-              <div className="flex-1 min-w-0">
-                {isEditing ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      value={editingName}
-                      onChange={(e) => setEditingName(e.target.value)}
-                      className="border rounded px-2 py-1 w-full text-black"
-                      autoFocus
-                    />
-                    <button type="button" onClick={saveEdit} className="px-2 py-1 rounded bg-black text-white text-xs">
-                      Save
-                    </button>
-                    <button type="button" onClick={cancelEdit} className="px-2 py-1 rounded border text-xs">
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <a className="block" href={`/class/${c.id}`}>
-                    <div className="text-sm font-semibold text-gray-900 line-clamp-1">{c.name}</div>
-                    <div className="text-xs text-gray-600 mt-1">
-                      {new Date(c.createdAt).toLocaleString()}
-                    </div>
-                  </a>
-                )}
+        {classes.map((c) => (
+          <div
+            key={c.id}
+            className="p-3 bg-gray-50 rounded-lg border hover:bg-gray-100 flex items-start justify-between gap-3"
+          >
+            <a className="flex-1 min-w-0 block" href={`/class/${c.id}`}>
+              <div className="text-sm font-semibold text-gray-900 line-clamp-1">{c.name}</div>
+              <div className="text-xs text-gray-600 mt-1">
+                {new Date(c.createdAt).toLocaleString()}
               </div>
+            </a>
 
-              {!isEditing && (
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => startEdit(c)}
-                    className="p-2 rounded hover:bg-white"
-                    title="Edit name"
-                  >
-                    <img src="/icons/pencil-edit.svg" alt="Edit" className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => remove(c.id)}
-                    className="p-2 rounded hover:bg-white"
-                    title="Delete class"
-                  >
-                    <img src="/icons/trash.svg" alt="Delete" className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
+            {/* Actions: Edit (go to settings tab) + Delete */}
+            <div className="flex items-center gap-1.5 self-center">
+              <button
+                type="button"
+                onClick={() => goToSettings(c.id)}
+                className="p-2 rounded hover:bg-white"
+                title="Edit class (open settings)"
+                aria-label="Edit class"
+              >
+                <img src="/icons/gear.svg" alt="" className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => remove(c.id)}
+                className="p-2 rounded hover:bg-white"
+                title="Delete class"
+                aria-label="Delete class"
+              >
+                <img src="/icons/trash.svg" alt="" className="w-4 h-4" />
+              </button>
             </div>
-          );
-        })}
+          </div>
+        ))}
       </div>
     </section>
   );
