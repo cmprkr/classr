@@ -7,9 +7,11 @@ type Lec = { id: string; originalName: string; kind: string };
 export default function LectureSettingsPanel({
   lectureId,
   onClose,
+  embedded = false, // ⬅️ NEW
 }: {
   lectureId: string;
   onClose?: () => void;
+  embedded?: boolean; // ⬅️ NEW
 }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -30,7 +32,6 @@ export default function LectureSettingsPanel({
     "OTHER",
   ];
 
-  // Load lecture name and kind
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -113,6 +114,85 @@ export default function LectureSettingsPanel({
     }
   }
 
+  // ⬇️ Two render modes: full-page (existing) and embedded (inline card)
+  if (embedded) {
+    return (
+      <div className="w-full">
+        <div className="rounded-xl bg-white shadow ring-1 ring-black/5 p-4 sm:p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold text-gray-900">Lecture settings</h2>
+            {onClose && (
+              <button onClick={onClose} className="text-xs px-2 py-1 rounded border">
+                Close
+              </button>
+            )}
+          </div>
+          {loading ? (
+            <div className="text-sm text-gray-600">Loading…</div>
+          ) : (
+            <>
+              <div>
+                <label className="block text-xs text-gray-700 mb-1">File name</label>
+                <input
+                  className="w-full rounded-lg border px-3 py-2 text-black disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  disabled={isLocked}
+                />
+                <div className="text-xs text-gray-500 mt-1">
+                  {isLocked
+                    ? "You cannot edit this lecture because you do not own it."
+                    : "This changes how the item appears in your list."}
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-700 mb-1">Type</label>
+                <select
+                  value={kind}
+                  onChange={(e) => setKind(e.target.value)}
+                  disabled={isLocked}
+                  className="w-full rounded-lg border px-3 py-2 text-black disabled:bg-gray-100 disabled:cursor-not-allowed"
+                >
+                  {resourceTypes.map((type) => (
+                    <option key={type} value={type}>
+                      {type.toLowerCase().replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                    </option>
+                  ))}
+                </select>
+                <div className="text-xs text-gray-500 mt-1">
+                  {isLocked ? "You cannot change the type because you do not own this lecture." : "Select the type."}
+                </div>
+              </div>
+              {error && <div className="text-sm text-red-600">{error}</div>}
+              <div className="flex gap-2">
+                <button
+                  onClick={save}
+                  disabled={!name.trim() || saving || isLocked}
+                  className="px-3 py-2 rounded-lg bg-black text-white text-sm disabled:opacity-50"
+                >
+                  {saving ? "Saving…" : "Save"}
+                </button>
+                <button
+                  onClick={remove}
+                  disabled={isLocked || deleting}
+                  className="px-3 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50"
+                >
+                  {deleting ? "Deleting…" : "Delete"}
+                </button>
+                {onClose && (
+                  <button onClick={onClose} className="px-3 py-2 rounded-lg border text-sm">
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // original full-screen panel
   return (
     <section className="relative h-full w-full overflow-hidden">
       <div className="absolute inset-0 bg-gradient-to-br from-indigo-200 via-fuchsia-200 to-pink-200" />
@@ -155,10 +235,7 @@ export default function LectureSettingsPanel({
                   >
                     {resourceTypes.map((type) => (
                       <option key={type} value={type}>
-                        {type
-                          .toLowerCase()
-                          .replace(/_/g, " ")
-                          .replace(/\b\w/g, (c) => c.toUpperCase())}
+                        {type.toLowerCase().replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
                       </option>
                     ))}
                   </select>

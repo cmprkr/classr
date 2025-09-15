@@ -2,6 +2,7 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
+import LectureSettingsPanel from "@/components/LectureSettingsPanel"; // ⬅️ NEW
 
 export default function LectureItem({
   l,
@@ -19,6 +20,7 @@ export default function LectureItem({
   const [open, setOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false); // ⬅️ NEW
   const [toggling, setToggling] = useState(false);
   const isSynced = !!l?.syncKey;
   const isNotOwned = l?.userId && l.userId !== currentUserId;
@@ -29,7 +31,6 @@ export default function LectureItem({
     if (toggling) return;
     setToggling(true);
     try {
-      console.log("Toggling lecture:", { id: l.id, classId: l.classId, userId: l.userId, syncKey: l.syncKey, includeInMemory });
       const res = await fetch(`/api/lectures/${l.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -46,7 +47,6 @@ export default function LectureItem({
         throw new Error(error);
       }
       const updated = await res.json();
-      console.log("Toggle response:", updated);
       l.includeInMemory = updated.includeInMemory;
       if (onToggled) await onToggled(l.id, updated.includeInMemory);
     } catch (e: any) {
@@ -56,11 +56,9 @@ export default function LectureItem({
     }
   }
 
-  function openSettingsPanel() {
-    const params = new URLSearchParams(search?.toString() || "");
-    params.set("tab", "class");
-    params.set("lectureId", l.id);
-    router.push(`/class/${classId}?${params.toString()}`);
+  // ⬇️ no longer routes the right pane; just toggles inline panel
+  function toggleSettingsInline() {
+    setSettingsOpen((v) => !v);
   }
 
   function openSummaryPage() {
@@ -130,9 +128,9 @@ export default function LectureItem({
           {canEdit && (
             <button
               type="button"
-              onClick={openSettingsPanel}
-              className="p-2 rounded hover:bg-white"
-              title="Lecture settings"
+              onClick={toggleSettingsInline} // ⬅️ CHANGED
+              className={`p-2 rounded hover:bg-white ${settingsOpen ? "bg-white" : ""}`}
+              title={settingsOpen ? "Hide lecture settings" : "Lecture settings"}
             >
               <img src="/icons/gear.svg" alt="Settings" className="w-4 h-4" />
             </button>
@@ -151,6 +149,22 @@ export default function LectureItem({
           </button>
         </div>
       </div>
+
+      {/* ⬇️ Inline lecture settings (independent of the chevron details) */}
+      {settingsOpen && (
+        <div
+          className={`border-x border-b p-3 ${isSynced ? syncedBg : normalBg}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <LectureSettingsPanel
+            lectureId={l.id}
+            onClose={() => setSettingsOpen(false)}
+            embedded // ⬅️ NEW: compact inline variant
+          />
+        </div>
+      )}
+
+      {/* ⬇️ Chevron (expand) details block – independent from settings */}
       {open && (
         <div
           className={`border-x border-b p-3 space-y-2 ${isSynced ? syncedBg : normalBg}`}
