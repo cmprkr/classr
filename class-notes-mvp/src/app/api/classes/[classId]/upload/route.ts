@@ -1,4 +1,3 @@
-// src/app/api/classes/[classId]/upload/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
@@ -72,13 +71,12 @@ async function ocrImageWithVision(filePath: string): Promise<string> {
   const ext = path.extname(filePath).replace(".", "") || "png";
   const b64 = `data:image/${ext};base64,${bytes.toString("base64")}`;
   const res = await openai.chat.completions.create({
-    model: MODELS.vision, // define in lib/openai (vision-capable model)
+    model: MODELS.vision,
     messages: [
       { role: "system", content: "Extract all legible text from the image. Return plain text only." },
       {
         role: "user",
         content: [
-          // types per your SDK; if TS complains, cast to any
           { type: "input_text", text: "Transcribe all text" },
           { type: "input_image", image_url: b64 },
         ] as any,
@@ -94,7 +92,6 @@ async function readTxt(filePath: string) {
 }
 
 async function readPdf(filePath: string) {
-  // Pure JS entry avoids test assets that can confuse the bundler
   const { default: pdfParse } = await import("pdf-parse/lib/pdf-parse.js");
   const data = await pdfParse(await fsp.readFile(filePath));
   return data.text || "";
@@ -113,15 +110,20 @@ export async function POST(
   const { classId } = await ctx.params;
   const user = await requireUser();
 
-  const clazz = await db.class.findFirst({ where: { id: classId, userId: user.id } });
+  const clazz = await db.class.findFirst({
+    where: { id: classId, userId: user.id },
+    select: { id: true, name: true, syncEnabled: true, syncKey: true },
+  });
   if (!clazz) return NextResponse.json({ error: "class not found" }, { status: 404 });
+
+  const effectiveSyncKey = clazz.syncEnabled ? (clazz.syncKey ?? null) : null;
 
   await fsp.mkdir(uploadsPath(), { recursive: true });
 
   const form = await req.formData();
-  const files = form.getAll("file") as File[]; // may be empty if manual text only
+  const files = form.getAll("file") as File[];
   const descriptor = (form.get("descriptor") as string) || undefined;
-  const manualText = (form.get("manualText") as string) || ""; // optional pasted transcript/text
+  const manualText = (form.get("manualText") as string) || "";
 
   if (!files.length && !manualText.trim()) {
     return NextResponse.json({ error: "no files or manual text" }, { status: 400 });
@@ -129,11 +131,12 @@ export async function POST(
 
   const results: any[] = [];
 
-  // Manual text-only item
+  // Manual text-only
   if (!files.length && manualText.trim()) {
     const lec = await db.lecture.create({
       data: {
         classId,
+        userId: user.id,                  // ✅ owner
         originalName: "Manual Text",
         descriptor,
         kind: "NOTES",
@@ -141,10 +144,10 @@ export async function POST(
         textContent: manualText.trim(),
         transcript: manualText.trim(),
         mime: "text/plain",
+        syncKey: effectiveSyncKey,        // ✅ inherit sync
       },
     });
 
-    // Create chunk rows first (vectorJson null), then best-effort embed
     const segments = [
       { start: 0, end: Math.min(300, Math.ceil(manualText.length / 6)), text: manualText.slice(0, 12000) },
     ];
@@ -167,9 +170,7 @@ export async function POST(
     try {
       const emb = await safeEmbed(chunks.map((c) => c.text));
       if (emb) {
-        // Update by (lectureId,start,end,source) is convenient; here we use single-row ids by finding again if needed.
         for (let i = 0; i < chunks.length; i++) {
-          // find the chunk we just created
           await db.chunk.updateMany({
             where: {
               lectureId: lec.id,
@@ -181,8 +182,6 @@ export async function POST(
             data: { vectorJson: JSON.stringify(emb.data[i].embedding) },
           });
         }
-      } else {
-        console.warn("upload: notes embed skipped (no non-empty chunks)");
       }
     } catch (e: any) {
       console.error("upload: notes embed failed:", e?.message || e);
@@ -203,11 +202,13 @@ export async function POST(
     const lec = await db.lecture.create({
       data: {
         classId,
+        userId: user.id,                  // ✅ owner
         originalName: f.name || path.basename(dest),
         filePath: dest,
         mime,
         descriptor,
         status: "PROCESSING",
+        syncKey: effectiveSyncKey,        // ✅ inherit sync
       },
     });
 
@@ -217,7 +218,6 @@ export async function POST(
       let durationSec: number | null = null;
 
       if (/^audio\//.test(mime)) {
-        // Transcribe audio
         const fileStream = fs.createReadStream(dest);
         const tr: any = await openai.audio.transcriptions.create({
           model: MODELS.stt,
@@ -232,7 +232,6 @@ export async function POST(
         transcriptText = tr.text || segments.map((s: any) => s.text).join(" ");
         durationSec = Math.ceil(tr.duration ?? (segments.at(-1)?.end ?? 0));
 
-        // Save transcript first
         await db.lecture.update({
           where: { id: lec.id },
           data: {
@@ -242,7 +241,6 @@ export async function POST(
           },
         });
 
-        // Chunk rows first (vectorJson null)
         const chunks = chunkTranscript(segments);
         for (const c of chunks) {
           await db.chunk.create({
@@ -258,7 +256,6 @@ export async function POST(
           });
         }
 
-        // Best-effort embed now
         try {
           const emb = await safeEmbed(chunks.map((c) => c.text));
           if (emb) {
@@ -274,8 +271,6 @@ export async function POST(
                 data: { vectorJson: JSON.stringify(emb.data[i].embedding) },
               });
             }
-          } else {
-            console.warn("embed skipped: no non-empty chunks for audio");
           }
         } catch (e: any) {
           console.error("embed failed (audio):", e?.message || e);
@@ -292,7 +287,6 @@ export async function POST(
       } else if (/^image\//.test(mime) || /\.(png|jpg|jpeg|gif|webp)$/i.test(filenameSafe)) {
         textContent = await ocrImageWithVision(dest);
       } else if (!mime && /\.(pdf|txt|md|docx|png|jpg|jpeg|gif|webp)$/i.test(filenameSafe)) {
-        // Extension fallback
         if (/\.pdf$/i.test(filenameSafe)) textContent = await readPdf(dest);
         else if (/\.(txt|md)$/i.test(filenameSafe)) textContent = await readTxt(dest);
         else if (/\.docx$/i.test(filenameSafe)) textContent = await readDocx(dest);
@@ -301,11 +295,10 @@ export async function POST(
         textContent = "";
       }
 
-      // Append manual text if provided
+      const manualText = (form.get("manualText") as string) || "";
       const manual = manualText?.trim() ? `\n\n[User Notes]\n${manualText.trim()}` : "";
       const sampleText = (transcriptText || textContent || "").slice(0, 4000) + manual;
 
-      // Auto-categorize
       const kind = await guessKind(lec.originalName, mime, descriptor, sampleText);
 
       // Summary (best-effort)
@@ -314,21 +307,61 @@ export async function POST(
       if (basis) {
         const sum = await openai.chat.completions.create({
           model: MODELS.chat,
+          temperature: 0.2,
           messages: [
-            { role: "system", content: "You create concise study notes." },
+            {
+              role: "system",
+              content:
+                [
+                  "You are a precise study-notes generator for college STEM courses.",
+                  "Output must be clear, concise, faithful to the source, and formatted in Markdown.",
+                  "Do NOT invent facts. If a requested section is not supported by the text, omit it.",
+                ].join(" "),
+            },
             {
               role: "user",
               content:
-                `Create: (1) 6-8 bullet summary, (2) 6 key terms & defs, (3) 8 flashcards JSON. Text:\n\n` +
-                basis.slice(0, 12000),
+                [
+                  "Create a structured study note from the following lecture text.",
+                  "",
+                  "REQUIRED FORMAT (Markdown):",
+                  "",
+                  "Keywords",
+                  "A short comma-separated list (3–10) of the most important terms/concepts from the lecture.",
+                  "",
+                  "Key Learnings",
+                  "1. <Short title>: <1–2 sentence takeaway>",
+                  "2. <Short title>: <1–2 sentence takeaway>",
+                  "… (aim for 4–8 total, depending on content density)",
+                  "",
+                  "Explanations",
+                  "For 3–5 of the most pivotal topics, create a section each:",
+                  "## <Topic Title>",
+                  "- **Key Points**",
+                  "  - Bullet points for the key rules/facts (3–6 bullets).",
+                  "- **Explanation**",
+                  "  A brief, intuitive paragraph that clarifies the concept without fluff.",
+                  "- **Worked Example** (only if the text supports it)",
+                  "  Provide a step-by-step mini example mirroring the lecture’s style.",
+                  "",
+                  "Homework",
+                  "List actionable items mentioned in the lecture (assignments, quizzes, due dates).",
+                  "If none are present in the text, write: “None noted.”",
+                  "",
+                  "CONSTRAINTS:",
+                  "- Use ONLY information present in the lecture text.",
+                  "- Keep the tone instructional and compact; avoid unnecessary prose.",
+                  "- Prefer math inline like `f(x) = x^2` where relevant.",
+                  "",
+                  "LECTURE TEXT (first ~12k chars):",
+                  basis.slice(0, 12000),
+                ].join("\n"),
             },
           ],
-          temperature: 0.2,
         });
         summaryContent = sum.choices[0].message.content ?? "";
       }
 
-      // Mark READY with content
       await db.lecture.update({
         where: { id: lec.id },
         data: {
@@ -341,13 +374,11 @@ export async function POST(
         },
       });
 
-      // For textual (non-audio) content, create chunk rows first then embed
       if (!transcriptText && (textContent || manualText)) {
         const text = (textContent || "") + (manualText ? `\n\n[User Notes]\n${manualText}` : "");
         const segments = [{ start: 0, end: Math.min(300, Math.ceil(text.length / 6)), text }];
         const chunks = chunkTranscript(segments);
 
-        // Create chunk rows with null vectors
         for (const c of chunks) {
           await db.chunk.create({
             data: {
@@ -362,7 +393,6 @@ export async function POST(
           });
         }
 
-        // Best-effort embed
         try {
           const emb = await safeEmbed(chunks.map((c) => c.text));
           if (emb) {
@@ -378,8 +408,6 @@ export async function POST(
                 data: { vectorJson: JSON.stringify(emb.data[i].embedding) },
               });
             }
-          } else {
-            console.warn("embed skipped: no non-empty chunks for document");
           }
         } catch (e: any) {
           console.error("embed failed (document):", e?.message || e);

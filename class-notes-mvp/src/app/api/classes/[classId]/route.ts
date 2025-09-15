@@ -1,56 +1,78 @@
 // src/app/api/classes/[classId]/route.ts
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { maybeUser, json401 } from "@/lib/auth";
+import { requireUser } from "@/lib/auth";
 import fsp from "fs/promises";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ classId: string }> }) {
-  const user = await maybeUser();
-  if (!user) return json401();
   const { classId } = await ctx.params;
+  const user = await requireUser();
 
-  const c = await db.class.findFirst({
+  const clazz = await db.class.findFirst({
     where: { id: classId, userId: user.id },
-    include: { lectures: { orderBy: { createdAt: "desc" } }, chats: { orderBy: { createdAt: "asc" } } },
+    select: {
+      id: true,
+      name: true,
+      syncEnabled: true,
+      syncKey: true,
+    },
   });
-  if (!c) return NextResponse.json({ error: "not found" }, { status: 404 });
-  return NextResponse.json(c);
+  if (!clazz) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  return NextResponse.json(clazz);
 }
 
 export async function PATCH(req: Request, ctx: { params: Promise<{ classId: string }> }) {
-  const user = await maybeUser();
-  if (!user) return json401();
   const { classId } = await ctx.params;
-  const { name } = await req.json();
+  const user = await requireUser();
+  const body = await req.json();
 
-  if (!name?.trim()) return NextResponse.json({ error: "name required" }, { status: 400 });
+  const { name, syncEnabled, syncKey } = body as {
+    name?: string;
+    syncEnabled?: boolean;
+    syncKey?: string | null;
+  };
 
-  const existing = await db.class.findFirst({ where: { id: classId, userId: user.id } });
-  if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
+  const clazz = await db.class.findFirst({
+    where: { id: classId, userId: user.id },
+  });
+  if (!clazz) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  const updated = await db.class.update({ where: { id: classId }, data: { name: name.trim() } });
+  const updated = await db.class.update({
+    where: { id: classId },
+    data: {
+      ...(typeof name === "string" ? { name } : {}),
+      ...(typeof syncEnabled === "boolean" ? { syncEnabled } : {}),
+      // store null or a valid key; if syncEnabled is false, you may want to null it out too
+      ...(syncKey !== undefined ? { syncKey } : {}),
+    },
+    select: { id: true, name: true, syncEnabled: true, syncKey: true },
+  });
+
   return NextResponse.json(updated);
 }
 
 export async function DELETE(_req: Request, ctx: { params: Promise<{ classId: string }> }) {
-  const user = await maybeUser();
-  if (!user) return json401();
   const { classId } = await ctx.params;
+  const user = await requireUser();
 
-  const klass = await db.class.findFirst({
+  const clazz = await db.class.findFirst({
     where: { id: classId, userId: user.id },
     include: { lectures: true },
   });
-  if (!klass) return NextResponse.json({ ok: true });
+  if (!clazz) return NextResponse.json({ ok: true });
 
-  await Promise.allSettled(
-    (klass.lectures || []).map((l) => (l.filePath ? fsp.unlink(l.filePath).catch(() => {}) : Promise.resolve()))
+  // delete files first
+  await Promise.all(
+    clazz.lectures
+      .map((l) => l.filePath)
+      .filter(Boolean)
+      .map((fp) => fsp.unlink(fp!).catch(() => {}))
   );
 
   await db.$transaction([
-    db.chunk.deleteMany({ where: { classId, clazz: { userId: user.id } } }),
-    db.chatMessage.deleteMany({ where: { classId, userId: user.id } }),
-    db.lecture.deleteMany({ where: { classId, clazz: { userId: user.id } } }),
+    db.chunk.deleteMany({ where: { classId } }),
+    db.lecture.deleteMany({ where: { classId } }),
     db.class.delete({ where: { id: classId } }),
   ]);
 

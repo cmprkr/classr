@@ -1,9 +1,11 @@
-// app/auth/signin/page.tsx
+// src/app/auth/signin/page.tsx
 import AllClassesPanel from "@/components/AllClassesPanel";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import Link from "next/link";
 import SignInCard from "@/components/SignInCard";
+
+export const dynamic = "force-dynamic";
 
 export default async function SignInPage() {
   const session = await getServerSession(authOptions);
@@ -29,6 +31,8 @@ export default async function SignInPage() {
                     <div className="text-gray-700">{session.user?.email}</div>
                   </div>
                   <form action="/api/auth/signout" method="post">
+                    {/* Redirect to /auth/signin on logout */}
+                    <input type="hidden" name="callbackUrl" value="/auth/signin" />
                     <button className="rounded-lg bg-red-600 px-4 py-2 text-white">
                       Sign out
                     </button>
@@ -36,7 +40,6 @@ export default async function SignInPage() {
                 </div>
               ) : (
                 <div className="space-y-6">
-                  {/* Credentials sign-in handled client-side (no manual CSRF needed) */}
                   <SignInCard callbackUrl="/account" />
 
                   <div className="text-sm text-gray-700">
@@ -45,13 +48,6 @@ export default async function SignInPage() {
                       Create one
                     </Link>
                   </div>
-
-                  {/* Optional OAuth providers:
-                  <div className="flex items-center gap-3">
-                    <a href="/api/auth/signin/google" className="flex-1 rounded-lg border px-4 py-2 text-center">
-                      Continue with Google
-                    </a>
-                  </div> */}
                 </div>
               )}
             </div>

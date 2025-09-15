@@ -9,21 +9,22 @@ generator client {
 }
 
 model User {
-  id            String    @id @default(cuid())
+  id            String   @id @default(cuid())
   name          String?
-  email         String?   @unique
+  username      String?  @unique   // ← add this line
+  email         String?  @unique
   emailVerified DateTime?
   image         String?
-  // credentials auth
-  passwordHash  String? // only when using Credentials provider
+  passwordHash  String?
 
-  classes Class[]
-  chats   ChatMessage[]
+  classes  Class[]
+  chats    ChatMessage[]
+  lectures Lecture[]
 
   accounts  Account[]
   sessions  Session[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Account {
@@ -77,6 +78,9 @@ model Class {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  syncEnabled Boolean @default(false)
+  syncKey     String?
 }
 
 enum ResourceType {
@@ -89,29 +93,38 @@ enum ResourceType {
 }
 
 model Lecture {
-  id           String   @id @default(cuid())
-  classId      String
-  clazz        Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  id      String @id @default(cuid())
+  classId String
+  clazz   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
 
-  // New fields
-  kind         ResourceType @default(LECTURE) // category
-  descriptor   String?                      // user-provided short description
-  mime         String?                      // uploaded mime type
-  textContent  String?                      // generic extracted text (pdf/txt/img/docx)
-  
+  // NEW: owner of this lecture (the user who uploaded/created it)
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Category/metadata
+  kind        ResourceType @default(LECTURE)
+  descriptor  String?
+  mime        String?
+  textContent String?
+
   originalName String
   filePath     String?
-  status       String   @default("PROCESSING")
+  status       String  @default("PROCESSING")
   durationSec  Int?
   transcript   String?
   segmentsJson String?
   summaryJson  String?
 
-  chunks       Chunk[]
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  chunks    Chunk[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  includeInMemory Boolean  @default(true) // <— NEW
+  // syncing + memory
+  syncKey         String?
+  includeInMemory Boolean @default(true)
+
+  @@index([syncKey])
+  @@index([createdAt])
 }
 
 model Chunk {

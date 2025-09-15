@@ -1,4 +1,3 @@
-// src/components/ClassChat.tsx
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -12,6 +11,7 @@ export default function ClassChat({ classId }: { classId: string }) {
   const footerRef = useRef<HTMLDivElement>(null);
   const [footerH, setFooterH] = useState(0);
 
+  // measure sticky footer
   useEffect(() => {
     if (!footerRef.current) return;
     const el = footerRef.current;
@@ -26,11 +26,11 @@ export default function ClassChat({ classId }: { classId: string }) {
     };
   }, []);
 
-  function scrollToBottom(behavior: ScrollBehavior = "auto") {
+  const scrollToBottom = (behavior: ScrollBehavior = "auto") => {
     requestAnimationFrame(() => {
       bottomRef.current?.scrollIntoView({ behavior, block: "end" });
     });
-  }
+  };
 
   async function load() {
     const c = await fetch(`/api/classes/${classId}`).then((r) => r.json());
@@ -38,8 +38,13 @@ export default function ClassChat({ classId }: { classId: string }) {
     scrollToBottom("auto");
   }
 
-  useEffect(() => { load(); }, [classId]);
-  useEffect(() => { if (history.length) scrollToBottom("smooth"); }, [history]);
+  useEffect(() => {
+    load();
+  }, [classId]);
+
+  useEffect(() => {
+    if (history.length) scrollToBottom("smooth");
+  }, [history]);
 
   async function send() {
     const text = msg.trim();
@@ -47,7 +52,6 @@ export default function ClassChat({ classId }: { classId: string }) {
     setMsg("");
     setHistory((h) => [...h, { role: "user", content: text, createdAt: new Date().toISOString() }]);
     scrollToBottom("smooth");
-
     try {
       const r = await fetch(`/api/classes/${classId}/chat`, {
         method: "POST",
@@ -59,12 +63,12 @@ export default function ClassChat({ classId }: { classId: string }) {
         ...h,
         { role: "assistant", content: data.answer, citations: data.citations, createdAt: new Date().toISOString() },
       ]);
-      scrollToBottom("smooth");
     } catch {
       setHistory((h) => [
         ...h,
         { role: "system", content: "Sorry—message failed to send.", createdAt: new Date().toISOString() },
       ]);
+    } finally {
       scrollToBottom("smooth");
     }
   }
@@ -78,8 +82,8 @@ export default function ClassChat({ classId }: { classId: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Scrollable messages: edge-to-edge (no rounded/border wrapper) */}
-      <div className="flex-1 overflow-auto space-y-3 p-3">
+      {/* Messages area (full-bleed; no odd margins) */}
+      <div className="flex-1 overflow-auto space-y-3 px-4 py-3">
         {history.map((m, i) => {
           const isUser = m.role === "user";
           return (
@@ -103,8 +107,8 @@ export default function ClassChat({ classId }: { classId: string }) {
         <div ref={bottomRef} style={{ height: 1, scrollMarginBottom: footerH + 8 }} />
       </div>
 
-      {/* Sticky input bar */}
-      <div ref={footerRef} className="sticky bottom-0 bg-white pt-3 px-3">
+      {/* Sticky input */}
+      <div ref={footerRef} className="sticky bottom-0 bg-white px-4 pb-4 pt-2 border-t">
         <div className="flex gap-2">
           <input
             value={msg}

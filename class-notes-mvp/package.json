@@ -12,6 +12,7 @@
     "@auth/prisma-adapter": "^2.10.0",
     "@prisma/client": "^6.16.0",
     "bcrypt": "^6.0.0",
+    "bcryptjs": "^3.0.2",
     "cosine-similarity": "^1.0.1",
     "formidable": "^3.5.4",
     "mammoth": "^1.10.0",

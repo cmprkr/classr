@@ -1,87 +1,130 @@
+// src/components/LectureItem.tsx
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 export default function LectureItem({
   l,
   classId,
+  currentUserId,               // ← optional owner check
   onDelete,
   onToggled,
 }: {
   l: any;
   classId: string;
-  onDelete?: (id: string) => Promise<void> | void;
-  onToggled?: (id: string, includeInMemory: boolean) => Promise<void> | void;
+  currentUserId?: string;
+  onDelete?: (id: string) => void | Promise<void>;
+  onToggled?: (id: string, includeInMemory: boolean) => void | Promise<void>;
 }) {
   const router = useRouter();
+  const search = useSearchParams();
+
   const [open, setOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
-  const [includeInMemory, setIncludeInMemory] = useState<boolean>(l?.includeInMemory ?? true);
-  const [busy, setBusy] = useState(false);
+  const [toggling, setToggling] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
-  async function handleDelete() {
-    if (!confirm("Delete this lecture?")) return;
-    if (onDelete) {
-      await onDelete(l.id);
-    } else {
-      await fetch(`/api/lectures/${l.id}`, { method: "DELETE" });
-    }
-  }
+  const isSynced = !!l?.syncKey;
+  const includeInMemory = !!l?.includeInMemory;
+
+  // Delete is allowed if:
+  // - not synced, OR
+  // - synced but uploaded by the current user
+  const canDelete = !isSynced || (isSynced && l?.userId && l.userId === currentUserId);
 
   async function toggleInclude() {
-    if (busy) return;
-    setBusy(true);
+    if (toggling) return;
+    setToggling(true);
     try {
-      const next = !includeInMemory;
-      const r = await fetch(`/api/lectures/${l.id}`, {
+      const res = await fetch(`/api/lectures/${l.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ includeInMemory: next }),
+        body: JSON.stringify({ includeInMemory: !includeInMemory }),
       });
-      if (r.ok) {
-        setIncludeInMemory(next);
-        onToggled?.(l.id, next);
-      } else {
-        const err = await r.json().catch(() => ({}));
-        alert(err?.error || "Failed to update setting");
-      }
+      if (!res.ok) throw new Error("Toggle failed");
+      if (onToggled) await onToggled(l.id, !includeInMemory);
+      // optimistic local flip
+      l.includeInMemory = !includeInMemory;
+    } catch {
+      // optional: toast
     } finally {
-      setBusy(false);
+      setToggling(false);
     }
   }
 
-  // Clicking the CARD (not the action buttons) opens the settings view in the right pane.
-  function openSettings() {
-    router.push(`/class/${classId}?lecture=${encodeURIComponent(l.id)}`);
+  async function remove() {
+    if (deleting) return;
+    if (!confirm("Delete this item? This cannot be undone.")) return;
+    setDeleting(true);
+    try {
+      const r = await fetch(`/api/lectures/${l.id}`, { method: "DELETE" });
+      if (!r.ok) throw new Error("Delete failed");
+      if (onDelete) await onDelete(l.id);
+    } catch {
+      // optional: toast
+    } finally {
+      setDeleting(false);
+    }
   }
 
+  function openSettingsPanel() {
+    // Clicking the row opens lecture settings in the right panel
+    const params = new URLSearchParams(search?.toString() || "");
+    params.set("panel", "lecture-settings");
+    params.set("lectureId", l.id);
+    router.push(`/class/${classId}?${params.toString()}`);
+  }
+
+  const cardBase =
+    "p-3 rounded-lg border flex items-start justify-between gap-3 cursor-pointer";
+  const syncedBg =
+    "bg-gradient-to-r from-indigo-50 via-fuchsia-50 to-pink-50 hover:from-indigo-100 hover:via-fuchsia-100 hover:to-pink-100 border-fuchsia-200";
+  const normalBg = "bg-gray-50 hover:bg-gray-100";
+
   return (
-    <div
-      className="p-3 bg-gray-50 rounded-lg border hover:bg-gray-100"
-      onClick={openSettings}
-      role="button"
-    >
-      {/* Header: left text, right actions */}
-      <div className="flex items-center justify-between gap-3">
+    <div className="rounded-lg overflow-hidden">
+      {/* Header row */}
+      <div
+        className={`${cardBase} ${isSynced ? syncedBg : normalBg}`}
+        onClick={openSettingsPanel}
+        title={isSynced ? "Synced item" : undefined}
+      >
+        {/* Left: title + meta */}
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold truncate text-gray-900">{l.originalName}</div>
+          <div className="flex items-center gap-2">
+            <div className="text-sm font-semibold truncate text-gray-900">
+              {l.originalName}
+            </div>
+            {isSynced && (
+              <span className="shrink-0 rounded-full text-[10px] px-2 py-0.5 bg-pink-100 text-pink-700 border border-pink-200">
+                Synced
+              </span>
+            )}
+          </div>
           <div className="text-xs mt-1 text-gray-600">
             {(l.kind ?? "OTHER")} • Status: {l.status}
             {l.durationSec ? ` • ${l.durationSec}s` : ""}
           </div>
         </div>
 
-        {/* Actions: eye • trash • chevron */}
-        <div className="flex items-center gap-2 flex-none" onClick={(e) => e.stopPropagation()}>
+        {/* Right controls */}
+        <div
+          className="flex items-center gap-1"
+          onClick={(e) => e.stopPropagation()} // don’t navigate when pressing buttons
+        >
+          {/* Eye toggle */}
           <button
             type="button"
             onClick={toggleInclude}
-            className="p-2 rounded hover:bg-white"
-            aria-pressed={includeInMemory}
-            title={includeInMemory ? "Included in AI memory (click to exclude)" : "Excluded from AI memory (click to include)"}
-            disabled={busy}
+            disabled={toggling}
+            className={`p-2 rounded hover:bg-white ${toggling ? "opacity-60" : ""}`}
+            title={
+              includeInMemory
+                ? "Included in AI memory (click to exclude)"
+                : "Excluded from AI memory (click to include)"
+            }
           >
             <img
               src={includeInMemory ? "/icons/eye.svg" : "/icons/eye-slash.svg"}
@@ -90,20 +133,25 @@ export default function LectureItem({
             />
           </button>
 
-          <button
-            type="button"
-            onClick={handleDelete}
-            className="p-2 rounded hover:bg-white"
-            title="Delete lecture"
-          >
-            <img src="/icons/trash.svg" alt="Delete" className="w-4 h-4" />
-          </button>
+          {/* Trash (hidden if synced and not owned by current user) */}
+          {canDelete && (
+            <button
+              type="button"
+              onClick={remove}
+              disabled={deleting}
+              className={`p-2 rounded hover:bg-white ${deleting ? "opacity-60" : ""}`}
+              title="Delete item"
+            >
+              <img src="/icons/trash.svg" alt="Delete" className="w-4 h-4" />
+            </button>
+          )}
 
+          {/* Chevron to expand inline preview */}
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
             className="p-2 rounded hover:bg-white"
-            title={open ? "Collapse" : "Expand"}
+            title={open ? "Collapse details" : "Expand details"}
           >
             <img
               src={open ? "/icons/chevron-down.svg" : "/icons/chevron-right.svg"}
@@ -114,15 +162,17 @@ export default function LectureItem({
         </div>
       </div>
 
-      {/* Expanded content (opened by chevron only) */}
+      {/* Expanded content (clean, consistent layout) */}
       {open && (
-        <div className="border-t p-3 space-y-2 bg-white mt-3" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="border-x border-b p-3 space-y-2 bg-white"
+          onClick={(e) => e.stopPropagation()}
+        >
           {l.summaryJson && (
             <div>
               <button
                 onClick={() => setSummaryOpen((o) => !o)}
                 className="flex items-center gap-2 text-sm font-medium text-black"
-                type="button"
               >
                 <img
                   src={summaryOpen ? "/icons/chevron-down.svg" : "/icons/chevron-right.svg"}
@@ -144,7 +194,6 @@ export default function LectureItem({
               <button
                 onClick={() => setTranscriptOpen((o) => !o)}
                 className="flex items-center gap-2 text-sm font-medium text-black"
-                type="button"
               >
                 <img
                   src={transcriptOpen ? "/icons/chevron-down.svg" : "/icons/chevron-right.svg"}

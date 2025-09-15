@@ -1,23 +1,31 @@
 // lib/auth.ts
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import { db } from "@/lib/db";
 
-export async function requireUser() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) throw new Error("UNAUTHENTICATED");
-  return session.user as { id: string; name?: string | null; email?: string | null };
-}
-
-// New: non-throwing helper
+/** Return the signed-in user or null (stale sessions resolve to null). */
 export async function maybeUser() {
   const session = await getServerSession(authOptions);
-  return session?.user?.id
-    ? (session.user as { id: string; name?: string | null; email?: string | null })
-    : null;
+  const id = session?.user?.id as string | undefined;
+  if (!id) return null;
+  const user = await db.user.findUnique({
+    where: { id },
+    select: { id: true, email: true, name: true, image: true },
+  });
+  return user ?? null;
 }
 
-// New: convenience for API routes
-export function json401() {
-  return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+/** Return the signed-in user or throw {status:401} if not signed in / stale. */
+export async function requireUser() {
+  const user = await maybeUser();
+  if (!user) {
+    throw Object.assign(new Error("Unauthorized"), { status: 401 });
+  }
+  return user;
+}
+
+/** Convenience helper for routes that want to early-return a 401 JSON. */
+export function json401(message = "Unauthorized") {
+  return NextResponse.json({ error: message }, { status: 401 });
 }

@@ -35,17 +35,21 @@ export default async function SignUpPage() {
                 </div>
               ) : (
                 <div className="space-y-6">
-                  {/* Signup form — point this to your signup API route */}
-                  <form
-                    action="/api/auth/signup"
-                    method="post"
-                    className="space-y-4"
-                  >
+                  {/* Signup form — posts as application/x-www-form-urlencoded */}
+                  <form action="/api/auth/signup" method="post" className="space-y-4">
                     <input
                       type="text"
                       name="name"
+                      placeholder="Full name (optional)"
+                      className="w-full rounded-lg border px-3 py-2 bg-white text-black placeholder-gray-500"
+                    />
+                    <input
+                      type="text"
+                      name="username"
                       required
-                      placeholder="Full name"
+                      pattern="^[a-zA-Z0-9_.-]{3,30}$"
+                      title="3–30 chars: letters, numbers, underscore, dot, dash"
+                      placeholder="Username"
                       className="w-full rounded-lg border px-3 py-2 bg-white text-black placeholder-gray-500"
                     />
                     <input
@@ -62,10 +66,7 @@ export default async function SignUpPage() {
                       placeholder="Password"
                       className="w-full rounded-lg border px-3 py-2 bg-white text-black placeholder-gray-500"
                     />
-                    <button
-                      type="submit"
-                      className="w-full rounded-lg bg-black px-4 py-2 text-white"
-                    >
+                    <button type="submit" className="w-full rounded-lg bg-black px-4 py-2 text-white">
                       Create account
                     </button>
                   </form>
