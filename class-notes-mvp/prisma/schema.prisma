@@ -8,10 +8,10 @@ generator client {
 }
 
 model User {
-  id            String        @id @default(cuid())
+  id            String            @id @default(cuid())
   name          String?
-  username      String?       @unique
-  email         String?       @unique
+  username      String?           @unique
+  email         String?           @unique
   emailVerified DateTime?
   image         String?
   passwordHash  String?
@@ -20,8 +20,11 @@ model User {
   lectures      Lecture[]
   accounts      Account[]
   sessions      Session[]
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  // NEW: per-lecture user prefs
+  lecturePrefs  LectureUserPref[]
 }
 
 model Account {
@@ -71,11 +74,7 @@ model Class {
   syncEnabled Boolean    @default(false)
   syncKey     String?
 
-  // NEW: serialized schedule config (days, time(s), mode)
-  // Example (uniform):
-  // { "days":["Mon","Wed"], "mode":"uniform", "uniform":{"start":"09:00","end":"10:15","timezone":"America/Indiana/Indianapolis"} }
-  // Example (per-day):
-  // { "days":["Tue","Thu"], "mode":"per-day", "perDay":{"Tue":{"start":"08:00","end":"08:50"},"Thu":{"start":"10:00","end":"10:50"}} }
+  // serialized schedule config
   scheduleJson Json?
 }
 
@@ -111,12 +110,29 @@ model Lecture {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
   syncKey         String?
+
+  // LEGACY: kept for back-compat; no longer authoritative
   includeInMemory Boolean      @default(true)
   includeInMemoryUser Json?
+
+  // NEW: per-user prefs relation
+  userPrefs       LectureUserPref[]
 
   @@index([syncKey])
   @@index([createdAt])
 }
+
+model LectureUserPref {
+  lectureId           String
+  userId              String
+  includeInAISummary  Boolean @default(true)
+
+  lecture Lecture @relation(fields: [lectureId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([lectureId, userId])
+}
+
 
 model Chunk {
   id        String   @id @default(cuid())
@@ -126,7 +142,7 @@ model Chunk {
   startSec  Int
   endSec    Int
   text      String
-  vectorJson String
+  vectorJson String   @default("")   // ⬅️ add this
   createdAt DateTime @default(now())
   clazz     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
   lecture   Lecture  @relation(fields: [lectureId], references: [id], onDelete: Cascade)

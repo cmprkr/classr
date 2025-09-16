@@ -1,4 +1,3 @@
-// src/app/api/lectures/[lectureId]/route.ts
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
@@ -25,8 +24,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ lectureId: str
     where: {
       id: lectureId,
       OR: [
-        { classId: { in: viewerClassIds } }, // in viewer's class (owner or imported)
-        { syncKey: { in: viewerSyncKeys } }, // shared via syncKey
+        { classId: { in: viewerClassIds } },
+        { syncKey: { in: viewerSyncKeys } },
       ],
     },
     select: {
@@ -38,19 +37,31 @@ export async function GET(_req: Request, ctx: { params: Promise<{ lectureId: str
       mime: true,
       status: true,
       durationSec: true,
-      includeInMemory: true,
+      includeInMemory: true, // legacy
       createdAt: true,
       updatedAt: true,
       transcript: true,
       textContent: true,
       summaryJson: true,
       syncKey: true,
+
+      // ✅ include the actual lecture creator
+      user: { select: { id: true, name: true, username: true } },
+
+      // class & class owner
       clazz: {
         select: {
           userId: true,
-          scheduleJson: true,                      // uploader’s schedule
+          scheduleJson: true,
           user: { select: { id: true, name: true, username: true } },
         },
+      },
+
+      // fetch THIS viewer's pref (if any)
+      userPrefs: {
+        where: { userId: user.id },
+        select: { includeInAISummary: true },
+        take: 1,
       },
     },
   });
@@ -59,14 +70,21 @@ export async function GET(_req: Request, ctx: { params: Promise<{ lectureId: str
     return NextResponse.json({ error: "Not found or not accessible" }, { status: 404 });
   }
 
+  const viewerIncludeInAISummary =
+    lec.userPrefs?.[0]?.includeInAISummary ??
+    // fallback to legacy if present, else true
+    (typeof lec.includeInMemory === "boolean" ? lec.includeInMemory : true);
+
   return NextResponse.json({
     ...lec,
-    uploader: lec.clazz.user,
+    viewerIncludeInAISummary,
+    // ✅ return the lecture creator as uploader; fallback to class owner if null
+    uploader: lec.user ?? lec.clazz.user,
     uploaderScheduleJson: lec.clazz.scheduleJson,
   });
 }
 
-/** PATCH: owner can mutate metadata; anyone with access can toggle includeInMemory */
+/** PATCH: owner can mutate metadata; legacy includeInMemory kept for back-compat */
 export async function PATCH(req: Request, ctx: { params: Promise<{ lectureId: string }> }) {
   const { lectureId } = await ctx.params;
   const user = await requireUser();
@@ -76,7 +94,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ lectureId: st
     descriptor,
     kind,
     originalName,
-    includeInMemory,
+    includeInMemory, // legacy
   }: {
     descriptor?: string | null;
     kind?: ResourceType | string | null;
@@ -129,12 +147,10 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ lectureId: st
     if (descriptor !== undefined) data.descriptor = descriptor;
     if (originalName !== undefined && originalName !== null) data.originalName = originalName;
     if (kindEnum !== undefined) data.kind = kindEnum;
+    // keep legacy writes if someone still calls this
+    if (typeof includeInMemory === "boolean") data.includeInMemory = includeInMemory;
   } else if (descriptor !== undefined || originalName !== undefined || kindEnum !== undefined) {
     return NextResponse.json({ error: "Cannot modify metadata of non-owned lecture" }, { status: 403 });
-  }
-
-  if (typeof includeInMemory === "boolean") {
-    data.includeInMemory = includeInMemory;
   }
 
   const updated = await db.lecture.update({
@@ -146,7 +162,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ lectureId: st
       originalName: true,
       descriptor: true,
       kind: true,
-      includeInMemory: true,
+      includeInMemory: true, // legacy
       updatedAt: true,
     },
   });

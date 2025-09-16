@@ -1,8 +1,8 @@
-// src/app/api/classes/[classId]/chat/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { openai, MODELS } from "@/lib/openai";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -29,9 +29,13 @@ function toPreview(text: string, max = 280) {
   return t.length <= max ? t : t.slice(0, max - 1) + "…";
 }
 
+// Optional; keep if you use it elsewhere
 async function backfillVectors(classId: string, maxToEmbed = 200) {
   const missing = await db.chunk.findMany({
-    where: { classId, vectorJson: "" },
+    where: {
+      classId,
+      OR: [{ vectorJson: "" }],
+    },
     orderBy: { createdAt: "desc" },
     take: maxToEmbed,
     select: { id: true, text: true },
@@ -71,29 +75,67 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ classId: s
 
     await backfillVectors(classId, 300);
 
-    // Get syncKeys for all user classes
-    const userClasses = await db.class.findMany({
+    // 1) Find lectures this user can see (owned or shared via syncKey)
+    const viewerClasses = await db.class.findMany({
       where: { userId: user.id },
-      select: { syncKey: true },
+      select: { id: true, syncKey: true },
     });
-    const userSyncKeys = userClasses.map(c => c.syncKey).filter((key): key is string => !!key);
+    const viewerClassIds = viewerClasses.map(c => c.id);
+    const viewerSyncKeys = viewerClasses.map(c => c.syncKey).filter((k): k is string => !!k);
 
-    // Pull chunks from owned or synced lectures
-    const chunks = await db.chunk.findMany({
+    const accessibleLectures = await db.lecture.findMany({
       where: {
         OR: [
-          { classId }, // Owned lectures in this class
-          { lecture: { syncKey: { in: userSyncKeys } } }, // Imported lectures via syncKey
+          { classId: { in: viewerClassIds } },
+          { syncKey: { in: viewerSyncKeys } },
         ],
-        lecture: { includeInMemory: true },
       },
-      orderBy: { createdAt: "desc" },
-      take: 4000,
-      include: {
-        lecture: { select: { originalName: true } },
-      },
+      select: { id: true, includeInMemory: true },
     });
 
+    if (accessibleLectures.length === 0) {
+      const fallback = "I don’t have any class materials I’m allowed to use for that yet.";
+      await db.chatMessage.create({
+        data: { classId, userId: user.id, role: "assistant", content: fallback, citations: "[]" },
+      });
+      return NextResponse.json({ answer: fallback, citations: [] });
+    }
+
+    // 2) Pull this viewer's prefs for those lectures
+    const prefs = await db.lectureUserPref.findMany({
+      where: { userId: user.id, lectureId: { in: accessibleLectures.map(l => l.id) } },
+      select: { lectureId: true, includeInAISummary: true },
+    });
+    const prefMap = new Map(prefs.map(p => [p.lectureId, p.includeInAISummary]));
+
+    // 3) Compute allowed lecture IDs for THIS viewer
+    const allowedLectureIds = new Set<string>();
+    for (const lec of accessibleLectures) {
+      const override = prefMap.get(lec.id);
+      if (override === true) allowedLectureIds.add(lec.id);
+      else if (override === false) { /* excluded by viewer */ }
+      else if (lec.includeInMemory) allowedLectureIds.add(lec.id); // fallback to legacy
+    }
+
+    if (allowedLectureIds.size === 0) {
+      const fallback =
+        "I don’t have any class materials I’m allowed to use for that yet. " +
+        "This can happen if items are excluded from AI memory for your account.";
+      await db.chatMessage.create({
+        data: { classId, userId: user.id, role: "assistant", content: fallback, citations: "[]" },
+      });
+      return NextResponse.json({ answer: fallback, citations: [] });
+    }
+
+    // 4) Retrieve only chunks from allowed lectures
+    const chunks = await db.chunk.findMany({
+      where: { lectureId: { in: Array.from(allowedLectureIds) } },
+      orderBy: { createdAt: "desc" },
+      take: 4000,
+      include: { lecture: { select: { originalName: true } } },
+    });
+
+    // 5) Score & select
     const scored: Cit[] = [];
     for (const c of chunks) {
       if (!c.vectorJson) continue;
@@ -101,7 +143,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ classId: s
       try { v = JSON.parse(c.vectorJson as any); } catch {}
       if (!v) continue;
       const score = cosine(qVec, v);
-      if (score > 0) {
+      if (score > 0.18) {
         scored.push({
           lectureId: c.lectureId,
           source: c.source,
@@ -113,9 +155,23 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ classId: s
         });
       }
     }
-
     scored.sort((a, b) => b.score - a.score);
     const topK = scored.slice(0, 12);
+
+    // 6) Strict RAG: if nothing to cite, no LLM call
+    if (topK.length === 0) {
+      const fallback =
+        "I don’t know based on the provided class materials I’m allowed to use. " +
+        "Try including relevant items in AI memory, then ask again.";
+      await db.chatMessage.create({
+        data: { classId, userId: user.id, role: "assistant", content: fallback, citations: "[]" },
+      });
+      return NextResponse.json({ answer: fallback, citations: [] });
+    }
+
+    const contextBlocks = topK.map((c, i) =>
+      `[#${i + 1} | ${c.source}${c.originalName ? ` • ${c.originalName}` : ""}${c.startSec!=null?` • ${c.startSec}-${c.endSec}s`:""} | score=${c.score.toFixed(3)}]\n${c.text}`
+    ).join("\n\n");
 
     const history = await db.chatMessage.findMany({
       where: { classId, userId: user.id },
@@ -123,26 +179,23 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ classId: s
       take: 50,
       select: { role: true, content: true },
     });
-
-    const contextBlocks = topK.map((c, i) =>
-      `[#${i + 1} | ${c.source}${c.originalName ? ` • ${c.originalName}` : ""}${c.startSec!=null?` • ${c.startSec}-${c.endSec}s`:""} | score=${c.score.toFixed(3)}]\n${c.text}`
-    ).join("\n\n");
-
     const historyBlocks = history.slice(-12)
       .map(m => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
       .join("\n");
 
     const system =
       `You are a helpful TA for the course "${clazz.name}". ` +
-      `Use only the provided class materials and the recent chat history. ` +
-      `If an answer isn't in the materials, say you don't know. ` +
-      `Cite snippets using [#index] corresponding to the context items. Be concise and precise.`;
+      `Use ONLY the provided class materials (context items). ` +
+      `If the answer is not in the materials, reply exactly: "I don't know based on the provided class materials." ` +
+      `Cite with [#index]. Be concise.`;
 
     const userPrompt =
 `Class context:
-${contextBlocks || "(no relevant snippets found)"}
+${contextBlocks}
+
 Recent chat (this class):
 ${historyBlocks || "(no recent messages yet)"}
+
 Question:
 ${query}
 `;
@@ -156,7 +209,7 @@ ${query}
       ],
     });
 
-    const answer = completion.choices[0].message.content ?? "Sorry, I couldn't generate a response.";
+    const answer = completion.choices[0].message.content ?? "I don't know based on the provided class materials.";
     const citations = topK.map((c, idx) => ({
       idx: idx + 1,
       lectureId: c.lectureId,

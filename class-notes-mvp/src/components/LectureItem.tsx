@@ -1,20 +1,12 @@
-// components/LectureItem.tsx
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import LectureSettingsPanel from "@/components/LectureSettingsPanel";
 
 type DayKey = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
+type UploaderBasic = { id: string; name?: string | null; username?: string | null };
 const ALL_DAYS: DayKey[] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const DAY_TOKEN: Record<DayKey, string> = {
-  Mon: "M",
-  Tue: "Tu",
-  Wed: "W",
-  Thu: "Th",
-  Fri: "F",
-  Sat: "Sa",
-  Sun: "Su",
-};
+const DAY_TOKEN: Record<DayKey, string> = { Mon: "M", Tue: "Tu", Wed: "W", Thu: "Th", Fri: "F", Sat: "Sa", Sun: "Su" };
 
 function formatDays(days: DayKey[]): string {
   const ordered = ALL_DAYS.filter((d) => days?.includes(d));
@@ -37,16 +29,13 @@ function formatRange(start?: string, end?: string): string | null {
 }
 function formatSchedule(s: any): string {
   if (!s || typeof s !== "object") return "";
-  const days = Array.isArray(s.days)
-    ? (s.days.filter((d: any): d is DayKey => ALL_DAYS.includes(d)) as DayKey[])
-    : [];
+  const days = Array.isArray(s.days) ? (s.days.filter((d: any): d is DayKey => ALL_DAYS.includes(d)) as DayKey[]) : [];
   if (days.length === 0) return "";
   if (s.mode === "per-day") {
     const perDay: Record<DayKey, { start?: string; end?: string }> = s.perDay || {};
     const groups: Record<string, DayKey[]> = {};
     for (const d of days) {
-      const st = perDay?.[d]?.start,
-        en = perDay?.[d]?.end;
+      const st = perDay?.[d]?.start, en = perDay?.[d]?.end;
       const key = `${st ?? ""}|${en ?? ""}`;
       (groups[key] ||= []).push(d);
     }
@@ -88,62 +77,65 @@ export default function LectureItem({
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [uploaderUser, setUploaderUser] = useState<UploaderBasic | null>(l?.uploader ?? null);
+
+  // NEW: viewer's per-lecture include flag
+  const [includeFlag, setIncludeFlag] = useState<boolean | null>(null);
   const [toggling, setToggling] = useState(false);
 
   // Schedules for metadata view
-  const [viewerSchedule, setViewerSchedule] = useState<any | null>(null);     // for owner
-  const [uploaderSchedule, setUploaderSchedule] = useState<any | null>(       // for non-owner
-    l?.uploaderScheduleJson ?? null
-  );
+  const [viewerSchedule, setViewerSchedule] = useState<any | null>(null);
+  const [uploaderSchedule, setUploaderSchedule] = useState<any | null>(l?.uploaderScheduleJson ?? null);
   const [metaLoading, setMetaLoading] = useState(false);
 
   const isSynced = !!l?.syncKey;
   const isNotOwned = l?.userId && l.userId !== currentUserId;
-  const includeInMemory = !!l?.includeInMemory;
   const canEdit = !isSynced || (isSynced && l?.userId && l.userId === currentUserId);
 
-  async function toggleInclude() {
-    if (toggling) return;
-    setToggling(true);
+  // Load this viewer's flag once
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch(`/api/lectures/${l.id}/preference`);
+        if (!r.ok) throw new Error(await r.text());
+        const data = await r.json();
+        if (alive) setIncludeFlag(Boolean(data?.includeInAISummary ?? true));
+      } catch {
+        if (alive) setIncludeFlag(true); // default if missing
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [l.id]);
 
+  async function toggleInclude() {
+    if (includeFlag == null || toggling) return;
+    setToggling(true);
     try {
-      const res = await fetch(`/api/lectures/${l.id}`, {
+      const res = await fetch(`/api/lectures/${l.id}/preference`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ includeInMemory: !includeInMemory }),
+        body: JSON.stringify({ includeInAISummary: !includeFlag }),
       });
-
-      // Read the body ONCE
       const raw = await res.text();
       let data: any = null;
       try {
         data = raw ? JSON.parse(raw) : null;
-      } catch {
-        // raw was not JSON; that's fine
-      }
-
+      } catch {}
       if (!res.ok) {
-        const msg =
-          (data && (data.error || data.message)) ||
-          raw ||
-          "Toggle failed";
-        throw new Error(msg);
+        throw new Error((data && (data.error || data.message)) || raw || "Toggle failed");
       }
-
-      // Success: use parsed JSON if present
-      const updated = data ?? {};
-      l.includeInMemory = !!updated.includeInMemory;
-
-      if (onToggled) {
-        await onToggled(l.id, !!updated.includeInMemory);
-      }
+      const next = !!(data?.includeInAISummary ?? !includeFlag);
+      setIncludeFlag(next);
+      if (onToggled) await onToggled(l.id, next);
     } catch (e: any) {
       console.error("Toggle failed:", e?.message || e);
     } finally {
       setToggling(false);
     }
   }
-
 
   function toggleSettingsInline() {
     setSettingsOpen((v) => !v);
@@ -156,52 +148,56 @@ export default function LectureItem({
     router.push(`/class/${classId}?${params.toString()}`);
   }
 
-  // Lazy-load schedules when Metadata is first opened
+  // Lazy-load metadata when Metadata is first opened (and when needed)
   useEffect(() => {
     let active = true;
     (async () => {
       if (!metadataOpen) return;
 
-      // If owner: fetch this class's schedule
-      if (l?.userId && l.userId === currentUserId && viewerSchedule == null) {
-        try {
-          setMetaLoading(true);
+      setMetaLoading(true);
+      try {
+        // Always fetch lecture once on open if we still need uploader or (for imported) uploaderSchedule
+        if (!uploaderUser || (l?.userId && l.userId !== currentUserId && uploaderSchedule == null)) {
+          const r = await fetch(`/api/lectures/${l.id}`);
+          if (r.ok) {
+            const data = await r.json();
+            if (active) {
+              if (l?.userId && l.userId !== currentUserId && uploaderSchedule == null) {
+                setUploaderSchedule(data?.uploaderScheduleJson ?? null);
+              }
+              setUploaderUser(data?.uploader ?? null);
+            }
+          }
+        }
+
+        // If it's your own lecture and we still need your class schedule
+        if (l?.userId && l.userId === currentUserId && viewerSchedule == null) {
           const r = await fetch(`/api/classes/${classId}`);
           if (r.ok) {
             const data = await r.json();
             if (active) setViewerSchedule(data?.scheduleJson ?? null);
           }
-        } catch {
-          // ignore
-        } finally {
-          if (active) setMetaLoading(false);
         }
-      }
-
-      // If non-owner: fetch uploader schedule from lecture GET (requires updated API)
-      if (l?.userId && l.userId !== currentUserId && uploaderSchedule == null) {
-        try {
-          setMetaLoading(true);
-          const r = await fetch(`/api/lectures/${l.id}`);
-          if (r.ok) {
-            const data = await r.json();
-            if (active) setUploaderSchedule(data?.uploaderScheduleJson ?? null);
-          }
-        } catch {
-          // ignore
-        } finally {
-          if (active) setMetaLoading(false);
-        }
+      } finally {
+        if (active) setMetaLoading(false);
       }
     })();
     return () => {
       active = false;
     };
-  }, [metadataOpen, classId, currentUserId, l?.id, l?.userId, viewerSchedule, uploaderSchedule]);
+  }, [
+    metadataOpen,
+    classId,
+    currentUserId,
+    l?.id,
+    l?.userId,
+    viewerSchedule,
+    uploaderSchedule,
+    uploaderUser,
+  ]);
 
   const scheduleSource =
-    l?.uploaderScheduleJson ??
-    (l?.userId === currentUserId ? viewerSchedule : uploaderSchedule);
+    l?.uploaderScheduleJson ?? (l?.userId === currentUserId ? viewerSchedule : uploaderSchedule);
   const scheduleText = formatSchedule(scheduleSource);
 
   const uploadedAt =
@@ -210,6 +206,14 @@ export default function LectureItem({
       : l?.uploadedAt && !isNaN(Date.parse(l.uploadedAt))
       ? new Date(l.uploadedAt)
       : null;
+
+  const creatorLabel = (() => {
+    if (!uploaderUser) return "—";
+    const handle = uploaderUser.username ? `@${uploaderUser.username}` : null;
+    const display = handle || uploaderUser.name || uploaderUser.id;
+    const isYou = uploaderUser.id && currentUserId && uploaderUser.id === currentUserId; // robust "you" check
+    return isYou ? `${display} (you)` : display;
+  })();
 
   const cardBase =
     "p-3 rounded-lg border flex items-start justify-between gap-3 cursor-pointer";
@@ -254,17 +258,17 @@ export default function LectureItem({
           <button
             type="button"
             onClick={toggleInclude}
-            disabled={toggling}
+            disabled={toggling || includeFlag == null}
             className={`p-2 rounded hover:bg-white ${toggling ? "opacity-60" : ""}`}
             title={
-              includeInMemory
+              includeFlag
                 ? "Included in AI memory (click to exclude)"
                 : "Excluded from AI memory (click to include)"
             }
           >
             <img
-              src={includeInMemory ? "/icons/eye.svg" : "/icons/eye-slash.svg"}
-              alt={includeInMemory ? "Included" : "Excluded"}
+              src={includeFlag ? "/icons/eye.svg" : "/icons/eye-slash.svg"}
+              alt={includeFlag ? "Included" : "Excluded"}
               className="w-4 h-4"
             />
           </button>
@@ -293,7 +297,6 @@ export default function LectureItem({
         </div>
       </div>
 
-      {/* Inline lecture settings */}
       {settingsOpen && (
         <div
           className={`border-x border-b p-3 ${isSynced ? syncedBg : normalBg}`}
@@ -307,10 +310,11 @@ export default function LectureItem({
         </div>
       )}
 
-      {/* Expand details */}
       {open && (
         <div
-          className={`border-x border-b p-3 space-y-2 ${isSynced ? syncedBg : normalBg}`}
+          className={`border-x border-b p-3 space-y-2 ${
+            isSynced ? syncedBg : normalBg
+          }`}
           onClick={(e) => e.stopPropagation()}
         >
           {l.summaryJson && (
@@ -355,7 +359,6 @@ export default function LectureItem({
             </div>
           )}
 
-          {/* Metadata */}
           <div>
             <button
               onClick={() => setMetadataOpen((o) => !o)}
@@ -368,7 +371,6 @@ export default function LectureItem({
               />
               Metadata
             </button>
-
             {metadataOpen && (
               <div className="mt-2 text-sm text-black space-y-1">
                 <div>
@@ -376,8 +378,11 @@ export default function LectureItem({
                   {uploadedAt ? uploadedAt.toLocaleString() : "—"}
                 </div>
                 <div>
+                  <span className="font-medium">Creator:</span> {creatorLabel}
+                </div>
+                <div>
                   <span className="font-medium">Schedule:</span>{" "}
-                  {metaLoading ? "Loading…" : scheduleText || "—"}
+                  {metaLoading ? "Loading…" : (scheduleText || "—")}
                 </div>
               </div>
             )}

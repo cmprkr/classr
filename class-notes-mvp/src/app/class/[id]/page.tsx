@@ -4,7 +4,6 @@ import { requireUser } from "@/lib/auth";
 import Link from "next/link";
 import ClassRightPane from "@/components/ClassRightPane";
 import ClassLeftPane from "@/components/ClassLeftPane";
-// ⛔️ REMOVE: import LectureSummaryPage
 
 export const dynamic = "force-dynamic";
 
@@ -16,15 +15,37 @@ export default async function ClassPage(props: {
   const sp = await props.searchParams;
   const user = await requireUser();
 
-  // ⛔️ REMOVE the early return that rendered <LectureSummaryPage/>
-
   const cls = await db.class.findFirst({
     where: { id, userId: user.id },
     include: {
-      lectures: { orderBy: { createdAt: "desc" } },
+      lectures: {
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          classId: true,
+          userId: true,
+          originalName: true,
+          status: true,
+          durationSec: true,
+          kind: true,
+          summaryJson: true,
+          transcript: true,
+          textContent: true,
+          includeInMemory: true, // legacy (still sent, but we prefer viewerIncludeInAISummary)
+          syncKey: true,
+          createdAt: true,
+          // Pull THIS viewer's pref for each owned lecture
+          userPrefs: {
+            where: { userId: user.id },
+            select: { includeInAISummary: true },
+            take: 1,
+          },
+        },
+      },
       chats: { orderBy: { createdAt: "asc" } },
     },
   });
+
   if (!cls) {
     return (
       <main className="mx-auto max-w-5xl p-6">
@@ -36,7 +57,14 @@ export default async function ClassPage(props: {
     );
   }
 
-  let mergedLectures = cls.lectures as any[];
+  // If synced, fetch all lectures sharing the syncKey and include viewer's pref too
+  let mergedLectures: any[] = cls.lectures.map((l) => ({
+    ...l,
+    viewerIncludeInAISummary:
+      l.userPrefs?.[0]?.includeInAISummary ??
+      (typeof l.includeInMemory === "boolean" ? l.includeInMemory : true),
+  }));
+
   if (cls.syncEnabled && cls.syncKey) {
     const synced = await db.lecture.findMany({
       where: { syncKey: cls.syncKey },
@@ -52,13 +80,26 @@ export default async function ClassPage(props: {
         summaryJson: true,
         transcript: true,
         textContent: true,
-        includeInMemory: true,
+        includeInMemory: true, // legacy
         syncKey: true,
         createdAt: true,
+        userPrefs: {
+          where: { userId: user.id },
+          select: { includeInAISummary: true },
+          take: 1,
+        },
       },
     });
+
+    const enrichedSynced = synced.map((l) => ({
+      ...l,
+      viewerIncludeInAISummary:
+        l.userPrefs?.[0]?.includeInAISummary ??
+        (typeof l.includeInMemory === "boolean" ? l.includeInMemory : true),
+    }));
+
     const byId = new Map<string, any>();
-    for (const l of [...cls.lectures, ...synced]) byId.set(l.id, l);
+    for (const l of [...mergedLectures, ...enrichedSynced]) byId.set(l.id, l);
     mergedLectures = Array.from(byId.values()).sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
@@ -74,7 +115,6 @@ export default async function ClassPage(props: {
         lectures={mergedLectures}
         currentUserId={user.id}
       />
-      {/* ⬇️ remove border-l to avoid double-thick divider */}
       <section className="flex-1 overflow-hidden flex flex-col">
         <ClassRightPane
           classId={cls.id}
