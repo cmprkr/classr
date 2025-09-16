@@ -8,13 +8,11 @@ type Klass = {
   name: string;
   createdAt: string;
   syncKey?: string | null;
-  scheduleJson?: any | null; // <- include schedule from API
+  scheduleJson?: any | null; // must be returned by /api/classes
 };
 
 type DayKey = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
 const ALL_DAYS: DayKey[] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-// Tokens keep it short but unambiguous (Tu vs Th)
 const DAY_TOKEN: Record<DayKey, string> = {
   Mon: "M",
   Tue: "Tu",
@@ -26,7 +24,6 @@ const DAY_TOKEN: Record<DayKey, string> = {
 };
 
 function formatDays(days: DayKey[]): string {
-  // Keep order Mon..Sun, map to tokens, and join with no spaces (e.g., MWF, TuTh)
   const ordered = ALL_DAYS.filter((d) => days.includes(d));
   return ordered.map((d) => DAY_TOKEN[d]).join("");
 }
@@ -37,25 +34,17 @@ function parseTimeParts(hhmm?: string) {
   const hh = Number(hhStr);
   const mm = Number(mmStr);
   if (Number.isNaN(hh) || Number.isNaN(mm)) return null;
-
   const suf = hh < 12 ? "a" : "p";
-  const h12 = ((hh % 12) || 12);
+  const h12 = (hh % 12) || 12;
   const base = mm === 0 ? String(h12) : `${h12}:${mmStr}`;
-  return {
-    withSuf: `${base}${suf}`, // e.g., "9a", "10:15a", "2p"
-    noSuf: base,              // e.g., "9", "10:15", "2"
-    suf,                      // "a" or "p"
-  };
+  return { withSuf: `${base}${suf}`, noSuf: base, suf };
 }
 
 function formatRange(start?: string, end?: string): string | null {
   const s = parseTimeParts(start);
   const e = parseTimeParts(end);
   if (!s || !e) return null;
-  // If both AM or both PM, show suffix only once at the end: "9–10:15a"
-  if (s.suf === e.suf) return `${s.noSuf}–${e.withSuf}`;
-  // Otherwise show both: "11:30a–1p"
-  return `${s.withSuf}–${e.withSuf}`;
+  return s.suf === e.suf ? `${s.noSuf}–${e.withSuf}` : `${s.withSuf}–${e.withSuf}`;
 }
 
 function formatSchedule(s: any): string {
@@ -63,13 +52,11 @@ function formatSchedule(s: any): string {
   const days = Array.isArray(s.days)
     ? (s.days.filter((d: any): d is DayKey => ALL_DAYS.includes(d)) as DayKey[])
     : [];
-
   if (days.length === 0) return "";
 
   if (s.mode === "per-day") {
-    // Group selected days by identical start/end pairs
     const perDay: Record<DayKey, { start?: string; end?: string }> = s.perDay || {};
-    const groups: Record<string, DayKey[]> = {}; // key: "start|end"
+    const groups: Record<string, DayKey[]> = {};
     for (const d of days) {
       const start = perDay?.[d]?.start;
       const end = perDay?.[d]?.end;
@@ -77,27 +64,21 @@ function formatSchedule(s: any): string {
       if (!groups[key]) groups[key] = [];
       groups[key].push(d);
     }
-
-    // Turn groups into compact strings
-    const parts: string[] = [];
-    // Preserve day order across groups
-    const groupEntries = Object.entries(groups).sort((a, b) => {
-      const aFirstIndex = ALL_DAYS.findIndex((d) => groups[a[0]].includes(d));
-      const bFirstIndex = ALL_DAYS.findIndex((d) => groups[b[0]].includes(d));
-      return aFirstIndex - bFirstIndex;
+    const entries = Object.entries(groups).sort((a, b) => {
+      const ai = ALL_DAYS.findIndex((d) => groups[a[0]].includes(d));
+      const bi = ALL_DAYS.findIndex((d) => groups[b[0]].includes(d));
+      return ai - bi;
     });
-
-    for (const [key, ds] of groupEntries) {
-      const [start, end] = key.split("|");
-      const dayText = formatDays(ds);
-      const range = formatRange(start || undefined, end || undefined);
-      parts.push(range ? `${dayText} ${range}` : dayText);
-    }
-
-    return parts.join("; ");
+    return entries
+      .map(([key, ds]) => {
+        const [start, end] = key.split("|");
+        const dayText = formatDays(ds);
+        const range = formatRange(start || undefined, end || undefined);
+        return range ? `${dayText} ${range}` : dayText;
+      })
+      .join("; ");
   }
 
-  // default to uniform
   const range = formatRange(s?.uniform?.start, s?.uniform?.end);
   const dayText = formatDays(days);
   return range ? `${dayText} ${range}` : dayText;
@@ -149,6 +130,7 @@ export default function AllClassesPanel() {
       <h2 className="text-lg font-semibold text-black border-b pb-2 mb-2">
         All Classes ({classes.length})
       </h2>
+
       <div className="flex gap-2">
         <input
           value={name}
@@ -160,6 +142,7 @@ export default function AllClassesPanel() {
           Add
         </button>
       </div>
+
       <div className="space-y-2">
         {classes.map((c) => {
           const isSynced = !!c.syncKey;
@@ -176,21 +159,36 @@ export default function AllClassesPanel() {
               className={`${cardBase} ${isSynced ? syncedBg : normalBg}`}
               title={isSynced ? "Synced class" : undefined}
             >
+              {/* Left: content (clickable) */}
               <a className="flex-1 min-w-0 block" href={`/class/${c.id}`}>
-                <div className="text-sm font-semibold text-gray-900 line-clamp-1">{c.name}</div>
+                {/* Row 1: title only */}
+                <div className="text-sm font-semibold text-gray-900 truncate">{c.name}</div>
+
+                {/* Row 2: created date */}
                 <div className="text-xs text-gray-600 mt-1">
                   {new Date(c.createdAt).toLocaleString()}
-                  {isSynced && (
-                    <span className="inline-block rounded-full text-[10px] px-2 py-0.5 bg-pink-100 text-pink-700 border border-pink-200 ml-2">
-                      Synced
-                    </span>
-                  )}
                 </div>
+
+                {/* Row 3: schedule (if any) */}
                 {scheduleText && (
                   <div className="text-xs text-gray-700 mt-0.5 truncate">{scheduleText}</div>
                 )}
+
+                {/* Row 4: badges (bottom row, like LectureItem) */}
+                {isSynced && (
+                  <div className="text-xs mt-1 text-gray-600 flex gap-2">
+                    <span className="inline-block rounded-full text-[10px] px-2 py-0.5 bg-pink-100 text-pink-700 border border-pink-200">
+                      Synced
+                    </span>
+                  </div>
+                )}
               </a>
-              <div className="flex items-center gap-1.5 self-center">
+
+              {/* Right: actions */}
+              <div
+                className="flex items-center gap-1.5"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <button
                   type="button"
                   onClick={() => goToSettings(c.id)}
