@@ -1,10 +1,9 @@
-// src/components/ClassRightPane.tsx
 "use client";
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import RecorderPanel from "@/components/RecorderPanel";
-import Chat from "@/components/ClassChat";
+import ClassChat from "@/components/ClassChat";
 import ClassSettingsPanel from "@/components/ClassSettingsPanel";
 import LectureSummaryPage from "@/components/LectureSummaryPage";
 
@@ -84,7 +83,9 @@ export default function ClassRightPane({
         <button
           onClick={() => go("record")}
           className={`px-3 py-1 rounded-md text-sm cursor-pointer ${
-            tab === "record" ? "bg-black text-white" : "text-black hover:bg-white"
+            tab === "record"
+              ? "bg-black text-white"
+              : "text-black hover:bg-white"
           }`}
           title="Recording"
         >
@@ -96,7 +97,9 @@ export default function ClassRightPane({
         <button
           onClick={() => go("chat")}
           className={`px-3 py-1 rounded-md text-sm cursor-pointer ${
-            tab === "chat" ? "bg-black text-white" : "text-black hover:bg-white"
+            tab === "chat"
+              ? "bg-black text-white"
+              : "text-black hover:bg-white"
           }`}
           title="Class chat"
         >
@@ -105,7 +108,9 @@ export default function ClassRightPane({
         <button
           onClick={() => go("class")}
           className={`px-3 py-1 rounded-md text-sm cursor-pointer ${
-            tab === "class" ? "bg-black text-white" : "text-black hover:bg-white"
+            tab === "class"
+              ? "bg-black text-white"
+              : "text-black hover:bg-white"
           }`}
           title="Settings"
         >
@@ -120,14 +125,7 @@ export default function ClassRightPane({
 
       {/* CHAT view */}
       <div className={`${tab === "chat" ? "block" : "hidden"} h-full w-full`}>
-        <div className="px-4 pt-4">
-          {classTitle && (
-            <h1 className="text-2xl font-semibold text-black">{classTitle}</h1>
-          )}
-        </div>
-        <div className="h-[calc(100%-56px)] px-4 pb-4">
-          <Chat classId={classId} />
-        </div>
+        <ClassChat classId={classId} classTitle={classTitle || "Class"} />
       </div>
 
       {/* SETTINGS view (Class only) */}

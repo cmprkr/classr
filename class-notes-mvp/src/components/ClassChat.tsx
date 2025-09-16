@@ -2,8 +2,18 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
-export default function ClassChat({ classId }: { classId: string }) {
+export default function ClassChat({
+  classId,
+  classTitle,
+}: {
+  classId: string;
+  classTitle: string;
+}) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   const [msg, setMsg] = useState("");
   const [history, setHistory] = useState<any[]>([]);
   const [isComposing, setIsComposing] = useState(false);
@@ -11,6 +21,15 @@ export default function ClassChat({ classId }: { classId: string }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const footerRef = useRef<HTMLDivElement>(null);
   const [footerH, setFooterH] = useState(0);
+
+  // Back button behavior matches LectureSummaryPage
+  function goBack() {
+    const currentParams = new URLSearchParams(searchParams.toString());
+    currentParams.delete("view");
+    currentParams.delete("lectureId");
+    const qs = currentParams.toString();
+    router.push(qs ? `/class/${classId}?${qs}` : `/class/${classId}`);
+  }
 
   // Measure sticky footer
   useEffect(() => {
@@ -51,7 +70,10 @@ export default function ClassChat({ classId }: { classId: string }) {
     const text = msg.trim();
     if (!text) return;
     setMsg("");
-    setHistory((h) => [...h, { role: "user", content: text, createdAt: new Date().toISOString() }]);
+    setHistory((h) => [
+      ...h,
+      { role: "user", content: text, createdAt: new Date().toISOString() },
+    ]);
     scrollToBottom("smooth");
     try {
       const r = await fetch(`/api/classes/${classId}/chat`, {
@@ -62,12 +84,21 @@ export default function ClassChat({ classId }: { classId: string }) {
       const data = await r.json();
       setHistory((h) => [
         ...h,
-        { role: "assistant", content: data.answer, citations: data.citations, createdAt: new Date().toISOString() },
+        {
+          role: "assistant",
+          content: data.answer,
+          citations: data.citations,
+          createdAt: new Date().toISOString(),
+        },
       ]);
     } catch {
       setHistory((h) => [
         ...h,
-        { role: "system", content: "Sorry—message failed to send.", createdAt: new Date().toISOString() },
+        {
+          role: "system",
+          content: "Sorry—message failed to send.",
+          createdAt: new Date().toISOString(),
+        },
       ]);
     } finally {
       scrollToBottom("smooth");
@@ -82,8 +113,21 @@ export default function ClassChat({ classId }: { classId: string }) {
   }
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Messages area (full-bleed; no odd margins) */}
+    <section className="flex h-full w-full flex-col bg-white">
+      {/* Header (same style as LectureSummaryPage): Back button + thin divider */}
+      <div className="px-4 py-4 border-b border-gray-200 flex items-center gap-3">
+        <button
+          onClick={goBack}
+          className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-black hover:bg-gray-100 cursor-pointer"
+        >
+          Back
+        </button>
+        <h1 className="text-sm font-semibold text-black truncate">
+          {classTitle}
+        </h1>
+      </div>
+
+      {/* Messages area */}
       <div className="flex-1 overflow-auto space-y-3 px-4 py-3">
         {history.map((m, i) => {
           const isUser = m.role === "user";
@@ -92,7 +136,9 @@ export default function ClassChat({ classId }: { classId: string }) {
               <div
                 className={[
                   "inline-block max-w-[80%] rounded-xl px-3 py-2 align-top",
-                  isUser ? "bg-white border text-black" : "bg-gray-100 text-black",
+                  isUser
+                    ? "bg-white border text-black"
+                    : "bg-gray-100 text-black",
                 ].join(" ")}
               >
                 <div className="whitespace-pre-wrap">{m.content}</div>
@@ -105,10 +151,13 @@ export default function ClassChat({ classId }: { classId: string }) {
             </div>
           );
         })}
-        <div ref={bottomRef} style={{ height: 1, scrollMarginBottom: footerH + 8 }} />
+        <div
+          ref={bottomRef}
+          style={{ height: 1, scrollMarginBottom: footerH + 8 }}
+        />
       </div>
 
-      {/* Sticky input, centered vertically */}
+      {/* Sticky input */}
       <div
         ref={footerRef}
         className="sticky bottom-0 bg-white px-4 py-4 border-t flex items-center"
@@ -123,11 +172,14 @@ export default function ClassChat({ classId }: { classId: string }) {
             placeholder="Ask about this class..."
             className="border rounded-lg px-3 py-2 w-full bg-white text-black placeholder-gray-500"
           />
-          <button onClick={send} className="px-4 py-2 rounded-lg bg-black text-white">
+          <button
+            onClick={send}
+            className="px-4 py-2 rounded-lg bg-black text-white"
+          >
             Send
           </button>
         </div>
       </div>
-    </div>
+    </section>
   );
 }
