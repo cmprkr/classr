@@ -1,3 +1,4 @@
+// src/app/api/auth/[...nextauth]/route.ts
 import NextAuth, { NextAuthOptions } from "next-auth";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import Credentials from "next-auth/providers/credentials";
@@ -11,21 +12,54 @@ export const authOptions: NextAuthOptions = {
   providers: [
     Credentials({
       name: "Credentials",
-      credentials: { email: { label: "Email", type: "email" }, password: { label: "Password", type: "password" } },
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" },
+      },
       async authorize(credentials) {
         const email = credentials?.email?.toLowerCase();
         const password = credentials?.password || "";
         if (!email || !password) return null;
+
         const user = await db.user.findUnique({ where: { email } });
         if (!user?.passwordHash) return null;
+
         const ok = await bcrypt.compare(password, user.passwordHash);
-        return ok ? { id: user.id, name: user.name || null, email: user.email || null } : null;
+        if (!ok) return null;
+
+        // ✅ include id + username + image so callbacks can hydrate the session
+        return {
+          id: user.id,
+          name: user.name ?? null,
+          email: user.email ?? null,
+          image: user.image ?? null,
+          username: user.username ?? null,
+        } as any;
       },
     }),
   ],
   callbacks: {
-    async jwt({ token, user }) { if (user) token.userId = (user as any).id; return token; },
-    async session({ session, token }) { if (token?.userId) (session as any).user.id = token.userId as string; return session; },
+    async jwt({ token, user }) {
+      // On initial sign-in, `user` is defined (from authorize)
+      if (user) {
+        token.userId = (user as any).id ?? token.userId ?? null;
+        (token as any).username = (user as any).username ?? (token as any).username ?? null;
+        (token as any).picture = (user as any).image ?? (token as any).picture ?? null;
+        token.name = user.name ?? token.name ?? null;
+        token.email = user.email ?? token.email ?? null;
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      if (session.user) {
+        (session.user as any).id = (token as any).userId ?? (session.user as any).id ?? null;
+        (session.user as any).username = (token as any).username ?? null;
+        session.user.name = token.name ?? session.user.name ?? null;
+        session.user.email = token.email ?? session.user.email ?? null;
+        session.user.image = (token as any).picture ?? session.user.image ?? null;
+      }
+      return session;
+    },
   },
   secret: process.env.NEXTAUTH_SECRET,
 };

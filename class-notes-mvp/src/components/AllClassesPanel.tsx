@@ -3,7 +3,105 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-type Klass = { id: string; name: string; createdAt: string; syncKey?: string | null };
+type Klass = {
+  id: string;
+  name: string;
+  createdAt: string;
+  syncKey?: string | null;
+  scheduleJson?: any | null; // <- include schedule from API
+};
+
+type DayKey = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
+const ALL_DAYS: DayKey[] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+// Tokens keep it short but unambiguous (Tu vs Th)
+const DAY_TOKEN: Record<DayKey, string> = {
+  Mon: "M",
+  Tue: "Tu",
+  Wed: "W",
+  Thu: "Th",
+  Fri: "F",
+  Sat: "Sa",
+  Sun: "Su",
+};
+
+function formatDays(days: DayKey[]): string {
+  // Keep order Mon..Sun, map to tokens, and join with no spaces (e.g., MWF, TuTh)
+  const ordered = ALL_DAYS.filter((d) => days.includes(d));
+  return ordered.map((d) => DAY_TOKEN[d]).join("");
+}
+
+function parseTimeParts(hhmm?: string) {
+  if (!hhmm || !/^\d{2}:\d{2}$/.test(hhmm)) return null;
+  const [hhStr, mmStr] = hhmm.split(":");
+  const hh = Number(hhStr);
+  const mm = Number(mmStr);
+  if (Number.isNaN(hh) || Number.isNaN(mm)) return null;
+
+  const suf = hh < 12 ? "a" : "p";
+  const h12 = ((hh % 12) || 12);
+  const base = mm === 0 ? String(h12) : `${h12}:${mmStr}`;
+  return {
+    withSuf: `${base}${suf}`, // e.g., "9a", "10:15a", "2p"
+    noSuf: base,              // e.g., "9", "10:15", "2"
+    suf,                      // "a" or "p"
+  };
+}
+
+function formatRange(start?: string, end?: string): string | null {
+  const s = parseTimeParts(start);
+  const e = parseTimeParts(end);
+  if (!s || !e) return null;
+  // If both AM or both PM, show suffix only once at the end: "9–10:15a"
+  if (s.suf === e.suf) return `${s.noSuf}–${e.withSuf}`;
+  // Otherwise show both: "11:30a–1p"
+  return `${s.withSuf}–${e.withSuf}`;
+}
+
+function formatSchedule(s: any): string {
+  if (!s || typeof s !== "object") return "";
+  const days = Array.isArray(s.days)
+    ? (s.days.filter((d: any): d is DayKey => ALL_DAYS.includes(d)) as DayKey[])
+    : [];
+
+  if (days.length === 0) return "";
+
+  if (s.mode === "per-day") {
+    // Group selected days by identical start/end pairs
+    const perDay: Record<DayKey, { start?: string; end?: string }> = s.perDay || {};
+    const groups: Record<string, DayKey[]> = {}; // key: "start|end"
+    for (const d of days) {
+      const start = perDay?.[d]?.start;
+      const end = perDay?.[d]?.end;
+      const key = `${start ?? ""}|${end ?? ""}`;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(d);
+    }
+
+    // Turn groups into compact strings
+    const parts: string[] = [];
+    // Preserve day order across groups
+    const groupEntries = Object.entries(groups).sort((a, b) => {
+      const aFirstIndex = ALL_DAYS.findIndex((d) => groups[a[0]].includes(d));
+      const bFirstIndex = ALL_DAYS.findIndex((d) => groups[b[0]].includes(d));
+      return aFirstIndex - bFirstIndex;
+    });
+
+    for (const [key, ds] of groupEntries) {
+      const [start, end] = key.split("|");
+      const dayText = formatDays(ds);
+      const range = formatRange(start || undefined, end || undefined);
+      parts.push(range ? `${dayText} ${range}` : dayText);
+    }
+
+    return parts.join("; ");
+  }
+
+  // default to uniform
+  const range = formatRange(s?.uniform?.start, s?.uniform?.end);
+  const dayText = formatDays(days);
+  return range ? `${dayText} ${range}` : dayText;
+}
 
 export default function AllClassesPanel() {
   const router = useRouter();
@@ -70,6 +168,8 @@ export default function AllClassesPanel() {
             "bg-gradient-to-r from-indigo-50 via-fuchsia-50 to-pink-50 hover:from-indigo-100 hover:via-fuchsia-100 hover:to-pink-100 border-fuchsia-200";
           const normalBg = "bg-gray-50 hover:bg-gray-100";
 
+          const scheduleText = formatSchedule(c.scheduleJson);
+
           return (
             <div
               key={c.id}
@@ -86,6 +186,9 @@ export default function AllClassesPanel() {
                     </span>
                   )}
                 </div>
+                {scheduleText && (
+                  <div className="text-xs text-gray-700 mt-0.5 truncate">{scheduleText}</div>
+                )}
               </a>
               <div className="flex items-center gap-1.5 self-center">
                 <button

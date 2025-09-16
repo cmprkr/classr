@@ -8,14 +8,15 @@ import { useRouter } from "next/navigation";
 import institutions from "data/institutions";
 type Institution = (typeof institutions)[number];
 
+type UniClass = { code: string; name: string; syncKey: string };
+
 type Klass = {
   id: string;
   name: string;
   syncEnabled?: boolean;
   syncKey?: string | null;
+  scheduleJson?: any | null; // server returns this as-is
 };
-
-type UniClass = { code: string; name: string; syncKey: string };
 
 // ---------- helpers ----------
 function slugifyCountry(input: string): string {
@@ -35,10 +36,7 @@ async function importClassesModule(country: string, primaryDomain: string) {
   const path = `data/universities/${countrySlug}/${domain}/classes`;
 
   if (!classesModuleCache.has(path)) {
-    classesModuleCache.set(
-      path,
-      import(/* @ts-ignore - dynamic segment */ path)
-    );
+    classesModuleCache.set(path, import(/* @ts-ignore - dynamic segment */ path));
   }
   return classesModuleCache.get(path)!;
 }
@@ -82,6 +80,57 @@ async function resolveInstitutionBySyncKey(
   return null;
 }
 
+// ---------- schedule types & helpers ----------
+type DayKey = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
+
+const ALL_DAYS: DayKey[] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+type ScheduleUniform = { start?: string; end?: string; timezone?: string };
+type SchedulePerDay = Record<DayKey, { start?: string; end?: string }>;
+
+type ClassSchedule =
+  | { days: DayKey[]; mode: "uniform"; uniform?: ScheduleUniform }
+  | { days: DayKey[]; mode: "per-day"; perDay?: SchedulePerDay };
+
+function toClassSchedule(raw: any): ClassSchedule {
+  // basic sanitize
+  const daysRaw = Array.isArray(raw?.days) ? raw.days : [];
+  const days = daysRaw.filter((d: any): d is DayKey => ALL_DAYS.includes(d));
+  if (raw?.mode === "per-day") {
+    const per: SchedulePerDay = {
+      Mon: {},
+      Tue: {},
+      Wed: {},
+      Thu: {},
+      Fri: {},
+      Sat: {},
+      Sun: {},
+    };
+    for (const d of days) {
+      const ent = raw?.perDay?.[d] || {};
+      per[d as DayKey] = {
+        start: typeof ent.start === "string" ? ent.start : undefined,
+        end: typeof ent.end === "string" ? ent.end : undefined,
+      };
+    }
+    return { days, mode: "per-day", perDay: Object.keys(per).length ? per : undefined };
+  }
+  // default uniform
+  const uniform = {
+    start: typeof raw?.uniform?.start === "string" ? raw.uniform.start : undefined,
+    end: typeof raw?.uniform?.end === "string" ? raw.uniform.end : undefined,
+    timezone:
+      typeof raw?.uniform?.timezone === "string"
+        ? raw.uniform.timezone
+        : "America/Indiana/Indianapolis",
+  };
+  return { days, mode: "uniform", uniform };
+}
+
+function timeValid(v?: string) {
+  return !!v && /^\d{2}:\d{2}$/.test(v);
+}
+
 // ---------- component ----------
 export default function ClassSettingsPanel({ classId }: { classId: string }) {
   const router = useRouter();
@@ -94,11 +143,26 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
   const [syncEnabled, setSyncEnabled] = useState(false);
   const [syncKey, setSyncKey] = useState<string>("");
 
-  // new: school + dynamic classes
+  // school + dynamic classes
   const [selectedSchoolDomain, setSelectedSchoolDomain] = useState<string>("");
   const [classOptions, setClassOptions] = useState<Array<{ value: string; label: string }>>([]);
   const [loadingClasses, setLoadingClasses] = useState(false);
   const [classesError, setClassesError] = useState<string | null>(null);
+
+  // schedule state
+  const [days, setDays] = useState<Set<DayKey>>(new Set());
+  const [sameTimeAll, setSameTimeAll] = useState(true);
+  const [uniformStart, setUniformStart] = useState<string>("");
+  const [uniformEnd, setUniformEnd] = useState<string>("");
+  const [perDay, setPerDay] = useState<SchedulePerDay>({
+    Mon: {},
+    Tue: {},
+    Wed: {},
+    Thu: {},
+    Fri: {},
+    Sat: {},
+    Sun: {},
+  });
 
   // preload: GET /api/classes/[classId]
   useEffect(() => {
@@ -111,10 +175,38 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
         if (!r.ok) throw new Error(await r.text());
         const data = (await r.json()) as Klass;
         if (!mounted) return;
+
         setName(data.name || "");
         const enabled = Boolean(data.syncEnabled);
         setSyncEnabled(enabled);
         setSyncKey((data.syncKey || "") as string);
+
+        // schedule
+        const sched = toClassSchedule(data.scheduleJson);
+        setDays(new Set<DayKey>(sched.days || []));
+        if (sched.mode === "per-day") {
+          setSameTimeAll(false);
+          const pd: SchedulePerDay = {
+            Mon: {},
+            Tue: {},
+            Wed: {},
+            Thu: {},
+            Fri: {},
+            Sat: {},
+            Sun: {},
+          };
+          for (const d of ALL_DAYS) {
+            pd[d] = {
+              start: sched.perDay?.[d]?.start,
+              end: sched.perDay?.[d]?.end,
+            };
+          }
+          setPerDay(pd);
+        } else {
+          setSameTimeAll(true);
+          setUniformStart(sched.uniform?.start || "");
+          setUniformEnd(sched.uniform?.end || "");
+        }
       } catch {
         if (mounted) setError("Failed to load class details.");
       } finally {
@@ -159,7 +251,7 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
         if (!mounted) return;
         setClassOptions(opts);
 
-        // ✅ Keep the existing class if it's still valid for this school; otherwise clear it
+        // keep existing class if still valid
         if (syncKey && !opts.some((o) => o.value === syncKey)) {
           setSyncKey("");
         }
@@ -167,7 +259,6 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
         if (!mounted) return;
         setClassesError(e?.message || "Could not load classes for the selected school.");
         setClassOptions([]);
-        // don't touch syncKey here; user may still have a previous selection to preserve elsewhere
       } finally {
         if (mounted) setLoadingClasses(false);
       }
@@ -175,7 +266,7 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
     return () => {
       mounted = false;
     };
-  }, [syncEnabled, selectedSchoolDomain]); // ← intentionally NOT clearing syncKey here
+  }, [syncEnabled, selectedSchoolDomain]); // intentionally not clearing syncKey here
 
   // restore school + class from existing syncKey (on first load)
   useEffect(() => {
@@ -190,10 +281,8 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
         if (!mounted) return;
 
         if (resolved) {
-          // This triggers the loader effect above, but we DO NOT clear syncKey there anymore
           setSelectedSchoolDomain(resolved.domain);
           setClassOptions(resolved.options);
-          // syncKey already set; leave as-is so the class select shows it
         } else {
           setClassesError("Could not match saved class to a school. Please reselect the school.");
         }
@@ -208,19 +297,69 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
     };
   }, [syncEnabled, syncKey, selectedSchoolDomain]);
 
+  // UI handlers: days + per-day
+  function toggleDay(d: DayKey) {
+    setDays((prev) => {
+      const next = new Set(prev);
+      if (next.has(d)) next.delete(d);
+      else next.add(d);
+      return next as Set<DayKey>;
+    });
+  }
+  function setPerDayStart(d: DayKey, v: string) {
+    setPerDay((prev) => ({ ...prev, [d]: { ...(prev[d] || {}), start: v } }));
+  }
+  function setPerDayEnd(d: DayKey, v: string) {
+    setPerDay((prev) => ({ ...prev, [d]: { ...(prev[d] || {}), end: v } }));
+  }
+
+  function buildScheduleJson(): ClassSchedule {
+    const selected = Array.from(days) as DayKey[];
+    if (sameTimeAll) {
+      return {
+        days: selected,
+        mode: "uniform",
+        uniform: {
+          start: uniformStart || undefined,
+          end: uniformEnd || undefined,
+          timezone: "America/Indiana/Indianapolis",
+        },
+      };
+    }
+    const per: SchedulePerDay = {
+      Mon: {},
+      Tue: {},
+      Wed: {},
+      Thu: {},
+      Fri: {},
+      Sat: {},
+      Sun: {},
+    };
+    for (const d of ALL_DAYS) {
+      if (!selected.includes(d)) continue;
+      per[d] = {
+        start: perDay[d]?.start || undefined,
+        end: perDay[d]?.end || undefined,
+      };
+    }
+    return { days: selected, mode: "per-day", perDay: per };
+  }
+
   async function save() {
     const trimmed = name.trim();
     if (!trimmed) return;
     setSaving(true);
     setError(null);
     try {
+      const scheduleJson = buildScheduleJson();
       const r = await fetch(`/api/classes/${classId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: trimmed,
           syncEnabled,
-          syncKey: syncEnabled ? syncKey || null : null,
+          syncKey: syncEnabled ? (syncKey || null) : null,
+          scheduleJson, // ✅ send schedule to server
         }),
       });
       if (!r.ok) throw new Error(await r.text());
@@ -232,7 +371,6 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
           body: JSON.stringify({ syncKey }),
         });
       }
-      // keep selections; no state reset
     } catch (e: any) {
       setError(e?.message || "Save failed.");
     } finally {
@@ -255,10 +393,30 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
     }
   }
 
+  // Validation pieces
+  const daysSelected = days.size > 0;
+
+  // strict time validation (does NOT allow "no days")
+  const timesValidStrict =
+    sameTimeAll
+      ? timeValid(uniformStart) && timeValid(uniformEnd)
+      : Array.from(days).every((d) => timeValid(perDay[d]?.start) && timeValid(perDay[d]?.end));
+
+  // overall schedule readiness: at least one day AND valid times
+  const scheduleReady = daysSelected && timesValidStrict;
+
+  // your existing relaxed validation (used for the red hint)
+  const timesValid =
+    !daysSelected ||
+    (sameTimeAll
+      ? timeValid(uniformStart) && timeValid(uniformEnd)
+      : Array.from(days).every((d) => timeValid(perDay[d]?.start) && timeValid(perDay[d]?.end)));
+
   const saveDisabled =
     !name.trim() ||
     saving ||
-    (syncEnabled && (!selectedSchoolDomain || !syncKey));
+    // if syncing, require school, class, AND a ready schedule
+    (syncEnabled && (!selectedSchoolDomain || !syncKey || !scheduleReady));
 
   return (
     <section className="relative h-full w-full overflow-hidden">
@@ -303,22 +461,32 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
                           setClassesError(null);
                         }
                       }}
+                      // 🔒 Only allow turning ON when schedule is ready.
+                      //     Allow turning OFF anytime.
+                      disabled={!scheduleReady && !syncEnabled}
+                      title={
+                        !scheduleReady && !syncEnabled
+                          ? "Set a schedule (days + valid start/end times) to enable sync"
+                          : undefined
+                      }
                     />
                     Sync with University
+                    {!scheduleReady && !syncEnabled && (
+                      <span className="ml-2 rounded bg-yellow-100 text-yellow-800 px-2 py-0.5 text-xs">
+                        requires schedule
+                      </span>
+                    )}
                   </label>
 
                   {syncEnabled && (
                     <div className="pl-6 space-y-4">
-                      {/* 1) Choose school (by unique domain) */}
+                      {/* Choose school */}
                       <div>
-                        <label className="block text-sm text-gray-700 mb-1">
-                          Choose school
-                        </label>
+                        <label className="block text-sm text-gray-700 mb-1">Choose school</label>
                         <select
                           className="w-full rounded-lg border px-3 py-2 text-black"
                           value={selectedSchoolDomain}
                           onChange={(e) => {
-                            // This is a USER-initiated school change → clear the class
                             setSelectedSchoolDomain(e.target.value);
                             setSyncKey("");
                           }}
@@ -335,11 +503,9 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
                         </p>
                       </div>
 
-                      {/* 2) Then choose a class */}
+                      {/* Choose university class */}
                       <div>
-                        <label className="block text-sm text-gray-700 mb-1">
-                          Choose university class
-                        </label>
+                        <label className="block text-sm text-gray-700 mb-1">Choose university class</label>
                         <select
                           className="w-full rounded-lg border px-3 py-2 text-black disabled:opacity-50"
                           value={syncKey}
@@ -374,12 +540,110 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
                   )}
                 </div>
 
+                {/* Schedule */}
+                <div className="space-y-3">
+                  <h3 className="text-lg font-semibold text-gray-900">Schedule</h3>
+
+                  {/* Days selector */}
+                  <div>
+                    <label className="block text-sm text-gray-700 mb-1">Days of the week</label>
+                    <div className="flex flex-wrap gap-2">
+                      {ALL_DAYS.map((d) => (
+                        <label
+                          key={d}
+                          className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1 ${
+                            days.has(d) ? "bg-black text-white border-black" : "bg-white text-black"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4"
+                            checked={days.has(d)}
+                            onChange={() => toggleDay(d)}
+                          />
+                          {d}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Same-time toggle */}
+                  <label className="flex items-center gap-2 text-sm text-gray-900">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={sameTimeAll}
+                      onChange={(e) => setSameTimeAll(e.target.checked)}
+                    />
+                    Same time for all selected days
+                  </label>
+
+                  {/* Times */}
+                  {sameTimeAll ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pl-0 sm:pl-2">
+                      <div>
+                        <label className="block text-sm text-gray-700 mb-1">Start time</label>
+                        <input
+                          type="time"
+                          value={uniformStart}
+                          onChange={(e) => setUniformStart(e.target.value)}
+                          className="w-full rounded-lg border px-3 py-2 text-black"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-gray-700 mb-1">End time</label>
+                        <input
+                          type="time"
+                          value={uniformEnd}
+                          onChange={(e) => setUniformEnd(e.target.value)}
+                          className="w-full rounded-lg border px-3 py-2 text-black"
+                        />
+                      </div>
+                      <p className="col-span-full text-xs text-gray-500">
+                        Times are local to America/Indiana/Indianapolis.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 pl-0 sm:pl-2">
+                      {ALL_DAYS.filter((d) => days.has(d)).length === 0 ? (
+                        <p className="text-sm text-gray-600">Select at least one day to set times.</p>
+                      ) : (
+                        ALL_DAYS.filter((d) => days.has(d)).map((d) => (
+                          <div key={d} className="grid grid-cols-[80px_1fr_1fr] items-center gap-3">
+                            <div className="text-sm font-medium text-gray-900">{d}</div>
+                            <input
+                              type="time"
+                              value={perDay[d]?.start || ""}
+                              onChange={(e) => setPerDayStart(d, e.target.value)}
+                              className="rounded-lg border px-3 py-2 text-black"
+                              placeholder="Start"
+                            />
+                            <input
+                              type="time"
+                              value={perDay[d]?.end || ""}
+                              onChange={(e) => setPerDayEnd(d, e.target.value)}
+                              className="rounded-lg border px-3 py-2 text-black"
+                              placeholder="End"
+                            />
+                          </div>
+                        ))
+                      )}
+                      <p className="text-xs text-gray-500">Times are local to America/Indiana/Indianapolis.</p>
+                    </div>
+                  )}
+
+                  {/* Tiny validation hint */}
+                  {daysSelected && !timesValid && (
+                    <p className="text-xs text-red-600">Please enter start & end times for the selected day(s).</p>
+                  )}
+                </div>
+
                 {error && <div className="text-sm text-red-600">{error}</div>}
 
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={save}
-                    disabled={saveDisabled}
+                    disabled={saveDisabled || (daysSelected && !timesValid)}
                     className="px-4 py-2 rounded-lg bg-black text-white disabled:opacity-50"
                   >
                     {saving ? "Saving…" : "Save"}

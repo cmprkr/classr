@@ -1,7 +1,6 @@
-// prisma/schema.prisma
 datasource db {
   provider = "sqlite" // or "postgresql" if you already use PG
-  url = env("DATABASE_URL")
+  url      = env("DATABASE_URL")
 }
 
 generator client {
@@ -9,66 +8,75 @@ generator client {
 }
 
 model User {
-  id String @id @default(cuid())
-  name String?
-  username String? @unique
-  email String? @unique
+  id            String        @id @default(cuid())
+  name          String?
+  username      String?       @unique
+  email         String?       @unique
   emailVerified DateTime?
-  image String?
-  passwordHash String?
-  classes Class[]
-  chats ChatMessage[]
-  lectures Lecture[]
-  accounts Account[]
-  sessions Session[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  image         String?
+  passwordHash  String?
+  classes       Class[]
+  chats         ChatMessage[]
+  lectures      Lecture[]
+  accounts      Account[]
+  sessions      Session[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 }
 
 model Account {
-  id String @id @default(cuid())
-  userId String
-  type String
-  provider String
+  id                String @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
   providerAccountId String
-  refresh_token String?
-  access_token String?
-  expires_at Int?
-  token_type String?
-  scope String?
-  id_token String?
-  session_state String?
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@unique([provider, providerAccountId])
 }
 
 model Session {
-  id String @id @default(cuid())
-  sessionToken String @unique
-  userId String
-  expires DateTime
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model VerificationToken {
   identifier String
-  token String @unique
-  expires DateTime
+  token      String   @unique
+  expires    DateTime
+
   @@unique([identifier, token])
 }
 
 model Class {
-  id String @id @default(cuid())
-  name String
-  userId String
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  lectures Lecture[]
-  chats ChatMessage[]
-  chunks Chunk[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  syncEnabled Boolean @default(false)
-  syncKey String?
+  id          String     @id @default(cuid())
+  name        String
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lectures    Lecture[]
+  chats       ChatMessage[]
+  chunks      Chunk[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  syncEnabled Boolean    @default(false)
+  syncKey     String?
+
+  // NEW: serialized schedule config (days, time(s), mode)
+  // Example (uniform):
+  // { "days":["Mon","Wed"], "mode":"uniform", "uniform":{"start":"09:00","end":"10:15","timezone":"America/Indiana/Indianapolis"} }
+  // Example (per-day):
+  // { "days":["Tue","Thu"], "mode":"per-day", "perDay":{"Tue":{"start":"08:00","end":"08:50"},"Thu":{"start":"10:00","end":"10:50"}} }
+  scheduleJson Json?
 }
 
 enum ResourceType {
@@ -83,54 +91,55 @@ enum ResourceType {
 }
 
 model Lecture {
-  id String @id @default(cuid())
-  classId String
-  clazz Class @relation(fields: [classId], references: [id], onDelete: Cascade)
-  userId String?
-  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
-  kind ResourceType @default(LECTURE)
-  descriptor String?
-  mime String?
-  textContent String?
-  originalName String
-  filePath String?
-  status String @default("PROCESSING")
-  durationSec Int?
-  transcript String?
-  segmentsJson String?
-  summaryJson String?
-  chunks Chunk[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  syncKey String?
-  includeInMemory Boolean @default(true)
+  id              String       @id @default(cuid())
+  classId         String
+  clazz           Class        @relation(fields: [classId], references: [id], onDelete: Cascade)
+  userId          String?
+  user            User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind            ResourceType @default(LECTURE)
+  descriptor      String?
+  mime            String?
+  textContent     String?
+  originalName    String
+  filePath        String?
+  status          String       @default("PROCESSING")
+  durationSec     Int?
+  transcript      String?
+  segmentsJson    String?
+  summaryJson     String?
+  chunks          Chunk[]
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  syncKey         String?
+  includeInMemory Boolean      @default(true)
   includeInMemoryUser Json?
+
   @@index([syncKey])
   @@index([createdAt])
 }
 
 model Chunk {
-  id String @id @default(cuid())
-  classId String
+  id        String   @id @default(cuid())
+  classId   String
   lectureId String
-  source String
-  startSec Int
-  endSec Int
-  text String
+  source    String
+  startSec  Int
+  endSec    Int
+  text      String
   vectorJson String
   createdAt DateTime @default(now())
-  clazz Class @relation(fields: [classId], references: [id], onDelete: Cascade)
-  lecture Lecture @relation(fields: [lectureId], references: [id], onDelete: Cascade)
+  clazz     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  lecture   Lecture  @relation(fields: [lectureId], references: [id], onDelete: Cascade)
 }
 
 model ChatMessage {
-  id String @id @default(cuid())
-  classId String
-  userId String
-  role String
-  content String
+  id        String   @id @default(cuid())
+  classId   String
+  userId    String
+  role      String
+  content   String
   citations String?
   createdAt DateTime @default(now())
-  clazz Class @relation(fields: [classId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clazz     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

@@ -26,16 +26,31 @@ export async function POST(req: Request) {
 
     // accept JSON or form-encoded (defensive)
     let name = "";
+    let scheduleJson: any = undefined;
+
     const ctype = req.headers.get("content-type") || "";
     if (ctype.includes("application/json")) {
       const body = await req.json().catch(() => ({}));
       name = (body?.name ?? "").trim();
-    } else if (ctype.includes("application/x-www-form-urlencoded") || ctype.includes("multipart/form-data")) {
+      scheduleJson = body?.scheduleJson ?? undefined;
+    } else if (
+      ctype.includes("application/x-www-form-urlencoded") ||
+      ctype.includes("multipart/form-data")
+    ) {
       const fd = await req.formData();
       name = String(fd.get("name") || "").trim();
+      const schedRaw = fd.get("scheduleJson");
+      if (typeof schedRaw === "string" && schedRaw) {
+        try {
+          scheduleJson = JSON.parse(schedRaw);
+        } catch {
+          scheduleJson = undefined;
+        }
+      }
     } else {
       const body = await req.json().catch(() => ({}));
       name = (body?.name ?? "").trim();
+      scheduleJson = body?.scheduleJson ?? undefined;
     }
 
     if (!name) {
@@ -43,7 +58,7 @@ export async function POST(req: Request) {
     }
 
     const created = await db.class.create({
-      data: { name, userId: user.id },
+      data: { name, userId: user.id, scheduleJson: scheduleJson ?? undefined },
     });
     return NextResponse.json(created);
   } catch (e: any) {

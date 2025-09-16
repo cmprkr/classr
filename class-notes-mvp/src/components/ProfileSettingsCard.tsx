@@ -7,7 +7,7 @@ type UserLite = {
   id: string | null;
   name: string | null;
   email: string | null;
-  username: string | null; // Reflects User model where username is optional
+  username: string | null;
   image?: string | null;
 };
 
@@ -24,7 +24,6 @@ export default function ProfileSettingsCard({
   const [previewUrl, setPreviewUrl] = useState<string | null>(user.image || null);
   const [busy, setBusy] = useState(false);
 
-  // Debug user data
   console.log("User data in ProfileSettingsCard:", {
     id: user.id,
     username: user.username,
@@ -32,7 +31,6 @@ export default function ProfileSettingsCard({
     name: user.name,
   });
 
-  // Derive avatar initial from current input value
   const initial = useMemo(() => {
     const src = (name || user.username || user.email || " ").trim();
     return src ? src[0]!.toUpperCase() : "U";
@@ -42,7 +40,6 @@ export default function ProfileSettingsCard({
     if (busy || !isSignedIn) return;
     setBusy(true);
     try {
-      // 1) Avatar upload (if a file is selected)
       if (pfpFile) {
         const fd = new FormData();
         fd.append("file", pfpFile);
@@ -52,7 +49,6 @@ export default function ProfileSettingsCard({
         setPreviewUrl(data.imageUrl);
         setPfpFile(null);
       }
-      // 2) Update name
       const response = await fetch("/api/me", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -61,7 +57,7 @@ export default function ProfileSettingsCard({
       if (!response.ok) {
         console.warn("Name PATCH failed:", await response.text());
       }
-      router.refresh(); // Refresh to pull fresh server data
+      router.refresh();
     } catch (e) {
       console.error("Save failed:", e);
       alert("Failed to save profile. Please try again.");
@@ -76,12 +72,41 @@ export default function ProfileSettingsCard({
     setName(user.name ?? "");
   }
 
+  function submitSignOut() {
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = "/api/auth/signout";
+    document.body.appendChild(form);
+    form.submit();
+  }
+
+  async function deleteProfile() {
+    if (busy || !isSignedIn) return;
+    const first = confirm("Delete your profile and all associated data? This cannot be undone.");
+    if (!first) return;
+    const second = confirm("Are you absolutely sure? This will permanently delete your account.");
+    if (!second) return;
+
+    setBusy(true);
+    try {
+      const res = await fetch("/api/me", { method: "DELETE" });
+      if (!res.ok) {
+        const msg = await res.text().catch(() => "");
+        throw new Error(msg || "Delete request failed.");
+      }
+      submitSignOut();
+    } catch (e: any) {
+      console.error("Delete failed:", e);
+      alert(`Failed to delete your profile.\n${e?.message ?? "Please try again or contact support."}`);
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="w-full max-w-6xl">
       <div className="rounded-3xl bg-white shadow-2xl ring-1 ring-black/5 p-6 sm:p-8">
         <h1 className="text-3xl font-semibold text-black mb-6">Account</h1>
         <div className="grid gap-6 md:gap-8">
-          {/* Profile Picture + Name + Username + Email */}
           <section className="rounded-2xl border bg-white p-5 sm:p-6">
             <header className="mb-3">
               <h2 className="text-lg font-semibold text-black">Profile Picture</h2>
@@ -121,10 +146,7 @@ export default function ProfileSettingsCard({
                     <label className="block text-sm font-medium text-black">Name</label>
                     <input
                       value={name}
-                      onChange={(e) => {
-                        console.log("Name input changed:", e.target.value); // Debug log
-                        setName(e.target.value);
-                      }}
+                      onChange={(e) => setName(e.target.value)}
                       placeholder="Enter your name"
                       className="mt-1 w-full rounded-lg border px-3 py-2 bg-white text-black placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       disabled={busy || !isSignedIn}
@@ -168,10 +190,10 @@ export default function ProfileSettingsCard({
               </div>
             </div>
           </section>
-          {/* Log Out */}
+
           {isSignedIn && (
             <section className="rounded-2xl border bg-white p-5 sm:p-6">
-              <div className="text-black">
+              <div className="text-black flex flex-wrap items-center gap-3">
                 <form action="/api/auth/signout" method="post">
                   <button
                     type="submit"
@@ -181,7 +203,19 @@ export default function ProfileSettingsCard({
                     Log Out
                   </button>
                 </form>
+
+                <button
+                  type="button"
+                  onClick={deleteProfile}
+                  className="rounded-lg border border-red-700 text-red-700 hover:bg-red-50 px-4 py-2 disabled:opacity-60"
+                  disabled={busy}
+                >
+                  Delete Profile
+                </button>
               </div>
+              <p className="mt-3 text-xs text-gray-600">
+                Deleting your profile permanently removes your account and associated data. This action cannot be undone.
+              </p>
             </section>
           )}
         </div>
