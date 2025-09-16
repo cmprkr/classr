@@ -147,7 +147,7 @@ export default function Sidebar({
     >
       {/* Top bar ONLY gets extra padding */}
       <div className="flex items-center justify-between border-b px-6 py-3">
-        <div className="text-2xl font-bold text-gray-800">PROD1</div>
+        <div className="text-2xl font-bold text-gray-800">classr</div>
         <button
           onClick={() => setCollapsed(true)}
           className="text-gray-700 hover:text-black"

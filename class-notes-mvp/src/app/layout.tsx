@@ -7,7 +7,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { db } from "@/lib/db";
 
-export const metadata = { title: "Product 1" };
+export const metadata = { title: "classr" };
 
 export default async function Root({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions);
