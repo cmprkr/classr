@@ -1,7 +1,7 @@
-//src/components/Uploader.tsx
+// src/components/Uploader.tsx
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 
 type FileWithType = {
   file: File;
@@ -16,6 +16,9 @@ export default function Uploader({
   onChanged?: () => void;
 }) {
   const [files, setFiles] = useState<FileWithType[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [spinner, setSpinner] = useState("|");
+  const spinnerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const resourceTypes = [
@@ -29,6 +32,24 @@ export default function Uploader({
     "OTHER",
   ];
 
+  // ASCII spinner animation (matches RecorderPanel)
+  useEffect(() => {
+    if (isUploading) {
+      const spinnerChars = ["|", "/", "-", "\\"];
+      let index = 0;
+      spinnerIntervalRef.current = setInterval(() => {
+        setSpinner(spinnerChars[index]);
+        index = (index + 1) % spinnerChars.length;
+      }, 100);
+    } else {
+      if (spinnerIntervalRef.current) clearInterval(spinnerIntervalRef.current);
+      setSpinner("|");
+    }
+    return () => {
+      if (spinnerIntervalRef.current) clearInterval(spinnerIntervalRef.current);
+    };
+  }, [isUploading]);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const newFiles = Array.from(e.target.files).map((file) => ({
@@ -40,10 +61,12 @@ export default function Uploader({
   };
 
   const removeFile = (index: number) => {
+    if (isUploading) return;
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
   const updateFileType = (index: number, kind: string) => {
+    if (isUploading) return;
     setFiles((prev) =>
       prev.map((fileWithType, i) =>
         i === index ? { ...fileWithType, kind } : fileWithType
@@ -52,8 +75,9 @@ export default function Uploader({
   };
 
   const handleUpload = async () => {
-    if (files.length === 0) return;
+    if (files.length === 0 || isUploading) return;
 
+    setIsUploading(true);
     try {
       for (const { file, kind } of files) {
         const formData = new FormData();
@@ -71,18 +95,21 @@ export default function Uploader({
         }
       }
 
-      setFiles([]); // Clear files after successful upload
-      if (fileInputRef.current) fileInputRef.current.value = ""; // Reset input
-      if (onChanged) onChanged(); // Trigger parent callback
+      setFiles([]);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      onChanged?.();
     } catch (error) {
       console.error("Upload failed:", error);
       alert("Failed to upload files.");
+    } finally {
+      setIsUploading(false);
     }
   };
 
   const handleCancel = () => {
-    setFiles([]); // Clear selected files
-    if (fileInputRef.current) fileInputRef.current.value = ""; // Reset input
+    if (isUploading) return;
+    setFiles([]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   return (
@@ -93,9 +120,11 @@ export default function Uploader({
           multiple
           ref={fileInputRef}
           onChange={handleFileChange}
-          className="block w-full text-sm text-black file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border file:border-gray-300 file:text-sm file:text-black file:bg-gray-50 file:hover:bg-gray-100"
+          disabled={isUploading}
+          className="block w-full text-sm text-black file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border file:border-gray-300 file:text-sm file:text-black file:bg-gray-50 file:hover:bg-gray-100 disabled:opacity-50"
         />
       </div>
+
       {files.length > 0 && (
         <div className="space-y-2">
           {files.map((fileWithType, index) => (
@@ -109,7 +138,8 @@ export default function Uploader({
               <select
                 value={fileWithType.kind}
                 onChange={(e) => updateFileType(index, e.target.value)}
-                className="text-sm text-black border border-gray-300 rounded-lg px-2 py-1"
+                disabled={isUploading}
+                className="text-sm text-black border border-gray-300 rounded-lg px-2 py-1 disabled:opacity-50"
               >
                 {resourceTypes.map((type) => (
                   <option key={type} value={type}>
@@ -122,7 +152,8 @@ export default function Uploader({
               </select>
               <button
                 onClick={() => removeFile(index)}
-                className="text-sm text-red-600 hover:text-red-800"
+                disabled={isUploading}
+                className="text-sm text-red-600 hover:text-red-800 disabled:opacity-50"
                 title="Remove file"
               >
                 <img
@@ -135,21 +166,36 @@ export default function Uploader({
           ))}
         </div>
       )}
+
       {files.length > 0 && (
-        <div className="flex gap-2">
+        <div className="flex items-center gap-3">
           <button
             onClick={handleUpload}
             className="px-4 py-2 rounded-lg bg-black text-white hover:bg-gray-800 disabled:opacity-50"
-            disabled={files.length === 0}
+            disabled={files.length === 0 || isUploading}
           >
-            Upload {files.length} File{files.length > 1 ? "s" : ""}
+            {isUploading
+              ? "Uploading…"
+              : `Upload ${files.length} File${files.length > 1 ? "s" : ""}`}
           </button>
           <button
             onClick={handleCancel}
-            className="px-4 py-2 rounded-lg border border-gray-300 text-black hover:bg-gray-100"
+            className="px-4 py-2 rounded-lg border border-gray-300 text-black hover:bg-gray-100 disabled:opacity-50"
+            disabled={isUploading}
           >
             Cancel
           </button>
+
+          {/* Inline uploading indicator (RecorderPanel-style) */}
+          {isUploading && (
+            <div
+              className="text-sm text-gray-700 inline-flex items-center gap-2"
+              aria-live="polite"
+            >
+              <span className="inline-block w-4 text-center font-mono">{spinner}</span>
+              <span>Uploading files…</span>
+            </div>
+          )}
         </div>
       )}
     </div>

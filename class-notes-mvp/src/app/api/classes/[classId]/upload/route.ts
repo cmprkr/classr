@@ -1,6 +1,5 @@
 // API route: POST /api/classes/[classId]/upload
 
-
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
@@ -10,6 +9,7 @@ import { chunkTranscript } from "@/lib/chunking";
 import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
+import { Readable } from "node:stream";
 import { ResourceType } from "@prisma/client";
 
 export const runtime = "nodejs";
@@ -203,11 +203,32 @@ export async function POST(
 
   // File uploads
   for (const f of files) {
-    const arrBuf = await f.arrayBuffer();
-    const buf = Buffer.from(arrBuf);
+    // ---- Size guard (configure to taste) ----
+    const MAX_BYTES = 1024 * 1024 * 512; // 512MB hard cap
+    if (typeof f.size === "number" && f.size > MAX_BYTES) {
+      results.push({ file: f.name, status: "FAILED", error: "file too large" });
+      continue;
+    }
+
     const filenameSafe = f.name?.replace(/[^\w.\-]+/g, "_") || `upload_${Date.now()}`;
     const dest = uploadsPath(`${Date.now()}_${filenameSafe}`);
-    await fsp.writeFile(dest, buf);
+
+    // ---- Stream browser File to disk (no full buffering) ----
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const nodeReadable = Readable.fromWeb((f as any).stream());
+        const writeStream = fs.createWriteStream(dest, { flags: "w" });
+        nodeReadable.on("error", reject);
+        writeStream.on("error", reject);
+        writeStream.on("finish", () => resolve());
+        nodeReadable.pipe(writeStream);
+      });
+    } catch (e: any) {
+      console.error("Failed to persist upload:", e?.message || e);
+      results.push({ file: f.name, status: "FAILED", error: "write failed" });
+      continue;
+    }
+
     const mime = f.type || "";
     const kindInput = form.get(`kind_${f.name}`) as string;
     const validTypes = Object.values(ResourceType);
@@ -234,8 +255,12 @@ export async function POST(
       let textContent = "";
       let durationSec: number | null = null;
 
-      if (/^audio\//.test(mime)) {
-        const fileStream = fs.createReadStream(dest);
+      // ---- Optional: cap transcription size to avoid long STT on giants ----
+      const TRANSCRIBE_MAX = 1024 * 1024 * 200; // 200MB cap for STT
+      const canTranscribe = /^audio\//.test(mime) && (typeof f.size !== "number" || f.size <= TRANSCRIBE_MAX);
+
+      if (canTranscribe && /^audio\//.test(mime)) {
+        const fileStream = fs.createReadStream(dest, { highWaterMark: 1024 * 1024 * 4 }); // 4MB chunks
         const tr: any = await openai.audio.transcriptions.create({
           model: MODELS.stt,
           file: fileStream,
@@ -314,11 +339,10 @@ export async function POST(
 
       const manualText = (form.get("manualText") as string) || "";
       const manual = manualText?.trim() ? `\n\n[User Notes]\n${manualText.trim()}` : "";
-      const sampleText = (transcriptText || textContent || "").slice(0, 4000) + manual;
+      const basis = (transcriptText || textContent || manualText || "").slice(0, 12000);
 
       // Summary (best-effort)
       let summaryContent = "";
-      const basis = transcriptText || textContent || manualText || "";
       if (basis) {
         const sum = await openai.chat.completions.create({
           model: MODELS.chat,
@@ -327,50 +351,22 @@ export async function POST(
             {
               role: "system",
               content:
-                [
-                  "You are a precise study-notes generator for college STEM courses.",
-                  "Output must be clear, concise, faithful to the source, and formatted in Markdown.",
-                  "Do NOT invent facts. If a requested section is not supported by the text, omit it.",
-                ].join(" "),
+                "You are a precise study-notes generator for college STEM courses. Output must be clear, concise, faithful to the source, and formatted in Markdown. Do NOT invent facts.",
             },
             {
               role: "user",
-              content:
-                [
-                  "Create a structured study note from the following lecture text.",
-                  "",
-                  "REQUIRED FORMAT (Markdown):",
-                  "",
-                  "Keywords",
-                  "A short comma-separated list (3–10) of the most important terms/concepts from the lecture.",
-                  "",
-                  "Key Learnings",
-                  "1. <Short title>: <1–2 sentence takeaway>",
-                  "2. <Short title>: <1–2 sentence takeaway>",
-                  "… (aim for 4–8 total, depending on content density)",
-                  "",
-                  "Explanations",
-                  "For 3–5 of the most pivotal topics, create a section each:",
-                  "## <Topic Title>",
-                  "- **Key Points**",
-                  "  - Bullet points for the key rules/facts (3–6 bullets).",
-                  "- **Explanation**",
-                  "  A brief, intuitive paragraph that clarifies the concept without fluff.",
-                  "- **Worked Example** (only if the text supports it)",
-                  "  Provide a step-by-step mini example mirroring the lecture’s style.",
-                  "",
-                  "Homework",
-                  "List actionable items mentioned in the lecture (assignments, quizzes, due dates).",
-                  "If none are present in the text, write: “None noted.”",
-                  "",
-                  "CONSTRAINTS:",
-                  "- Use ONLY information present in the lecture text.",
-                  "- Keep the tone instructional and compact; avoid unnecessary prose.",
-                  "- Prefer math inline like `f(x) = x^2` where relevant.",
-                  "",
-                  "LECTURE TEXT (first ~12k chars):",
-                  basis.slice(0, 12000),
-                ].join("\n"),
+              content: [
+                "Create a structured study note from the following lecture text.",
+                "",
+                "REQUIRED FORMAT (Markdown):",
+                "Keywords",
+                "Key Learnings",
+                "Explanations",
+                "Homework",
+                "",
+                "LECTURE TEXT (first ~12k chars):",
+                basis + manual,
+              ].join("\n"),
             },
           ],
         });
