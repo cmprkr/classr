@@ -13869,14 +13869,6 @@ export default [
     "country": "Belgium"
   },
   {
-    "web_pages": ["http://www.howest.be/"],
-    "name": "Hogeschool West-Vlaanderen (TU)",
-    "alpha_two_code": "BE",
-    "state-province": null,
-    "domains": ["howest.be"],
-    "country": "Belgium"
-  },
-  {
     "web_pages": ["http://www.hzs.be/"],
     "name": "Hogere Zeevaartschool - Maritime Academy",
     "alpha_two_code": "BE",
@@ -32349,14 +32341,6 @@ export default [
     "alpha_two_code": "IN",
     "state-province": null,
     "domains": ["kannuruniversity.ac.in"],
-    "country": "India"
-  },
-  {
-    "web_pages": ["http://www.kanpuruniversity.org/"],
-    "name": "Chhatrapati Shahu Ji Maharaj University",
-    "alpha_two_code": "IN",
-    "state-province": null,
-    "domains": ["kanpuruniversity.org"],
     "country": "India"
   },
   {
@@ -65180,14 +65164,6 @@ export default [
     "country": "Turkiye"
   },
   {
-    "web_pages": ["http://www.comu.edu.tr/"],
-    "name": "Canakkale (18th March) University",
-    "alpha_two_code": "TR",
-    "state-province": null,
-    "domains": ["comu.edu.tr"],
-    "country": "Turkiye"
-  },
-  {
     "web_pages": ["http://www.cu.edu.tr/"],
     "name": "Cukurova University",
     "alpha_two_code": "TR",
@@ -65561,14 +65537,6 @@ export default [
     "alpha_two_code": "TR",
     "state-province": null,
     "domains": ["ogu.edu.tr"],
-    "country": "Turkiye"
-  },
-  {
-    "web_pages": ["http://www.omu.edu.tr/"],
-    "name": "Ondokuz Mayis University Samsun",
-    "alpha_two_code": "TR",
-    "state-province": null,
-    "domains": ["omu.edu.tr"],
     "country": "Turkiye"
   },
   {
@@ -69913,14 +69881,6 @@ export default [
     "alpha_two_code": "TR",
     "state-province": null,
     "domains": ["toros.edu.tr"],
-    "country": "Turkiye"
-  },
-  {
-    "web_pages": ["http://www.thk.edu.tr/"],
-    "name": "Turkish Aeronautical Association University",
-    "alpha_two_code": "TR",
-    "state-province": null,
-    "domains": ["thk.edu.tr"],
     "country": "Turkiye"
   },
   {
@@ -79671,14 +79631,6 @@ export default [
     "country": "France"
   },
   {
-    "web_pages": ["https://www.insead.edu/"],
-    "name": "Institut privé d'enseignement supérieur",
-    "alpha_two_code": "FR",
-    "state-province": null,
-    "domains": ["insead.edu"],
-    "country": "France"
-  },
-  {
     "web_pages": ["https://thk.edu.tr/"],
     "name": "Türk Hava Kurumu Üniversitesi",
     "alpha_two_code": "TR",
@@ -79869,14 +79821,6 @@ export default [
     "state-province": null,
     "domains": ["universidadean.edu.co"],
     "country": "Colombia"
-  },
-  {
-    "web_pages": ["https://www.univ-jfc.fr/"],
-    "name": "INU Champollion",
-    "alpha_two_code": "FR",
-    "state-province": null,
-    "domains": ["univ-jfc.fr"],
-    "country": "France"
   },
   {
     "web_pages": ["https://www.ifmparis.fr/"],
@@ -80071,27 +80015,11 @@ export default [
     "country": "Turkiye"
   },
   {
-    "web_pages": ["https://www.thk.edu.tr"],
-    "name": "University of Turkish Aeronautical Association",
-    "alpha_two_code": "TR",
-    "state-province": null,
-    "domains": ["thk.edu.tr"],
-    "country": "Turkiye"
-  },
-  {
     "web_pages": ["https://www.omu.edu.tr"],
     "name": "Ondokuz Mayıs University",
     "alpha_two_code": "TR",
     "state-province": null,
     "domains": ["omu.edu.tr"],
-    "country": "Turkiye"
-  },
-  {
-    "web_pages": ["https://www.ieu.edu.tr"],
-    "name": "İzmir University of Economics",
-    "alpha_two_code": "TR",
-    "state-province": null,
-    "domains": ["ieu.edu.tr"],
     "country": "Turkiye"
   },
   {
@@ -80583,14 +80511,6 @@ export default [
     "country": "United States"
   },
   {
-    "web_pages": ["https://www.inteli.edu.br/"],
-    "name": "Inteli",
-    "alpha_two_code": "BR",
-    "state-province": null,
-    "domains": ["inteli.edu.br"],
-    "country": "Brazil"
-  },
-  {
     "web_pages": ["https://www.bou.ac.bw/"],
     "name": "Botswana Open University",
     "alpha_two_code": "BW",
@@ -81047,30 +80967,6 @@ export default [
     "country": "Uzbekistan"
   },
   {
-    "web_pages": ["https://escp.eu/"],
-    "name": "ESCP Business School",
-    "alpha_two_code": "FR",
-    "state-province": null,
-    "domains": ["escp.eu"],
-    "country": "France"
-  },
-  {
-    "web_pages": ["https://escp.eu/madrid"],
-    "name": "ESCP Business School",
-    "alpha_two_code": "ES",
-    "state-province": null,
-    "domains": ["escp.eu"],
-    "country": "Spain"
-  },
-  {
-    "web_pages": ["https://escp.eu/london"],
-    "name": "ESCP Business School",
-    "alpha_two_code": "GB",
-    "state-province": null,
-    "domains": ["escp.eu"],
-    "country": "United Kingdom"
-  },
-  {
     "web_pages": ["https://www.stmarytx.edu/"],
     "name": "St. Mary's University",
     "alpha_two_code": "US",
@@ -81303,14 +81199,6 @@ export default [
     "country": "United Kingdom"
   },
   {
-    "web_pages": ["https://www.univap.br/univap/"],
-    "name": "Universidade do Vale do Paraíba – Univap",
-    "alpha_two_code": "BR",
-    "state-province": "São José dos Campos",
-    "domains": ["univap.br"],
-    "country": "Brazil"
-  },
-  {
     "web_pages": ["https://portal.anhembi.br/"],
     "name": "Universidade Anhembi Morumbi - UAM",
     "alpha_two_code": "BR",
@@ -81428,14 +81316,6 @@ export default [
     "alpha_two_code": "GB",
     "state-province": "London",
     "domains": ["sgul.ac.uk"],
-    "country": "United Kingdom"
-  },
-  {
-    "web_pages": ["https://www.trinitycollegebristol.ac.uk/"],
-    "name": "Trinity College Bristol",
-    "alpha_two_code": "GB",
-    "state-province": "Bristol",
-    "domains": ["trinitycollegebristol.ac.uk"],
     "country": "United Kingdom"
   },
   {
