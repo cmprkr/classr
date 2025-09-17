@@ -1,4 +1,3 @@
-// app/class/[id]/page.tsx
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import Link from "next/link";
@@ -57,7 +56,7 @@ export default async function ClassPage(props: {
     );
   }
 
-  // If synced, fetch all lectures sharing the syncKey and include viewer's pref too
+  // Merge synced lectures if applicable
   let mergedLectures: any[] = cls.lectures.map((l) => ({
     ...l,
     viewerIncludeInAISummary:
@@ -65,7 +64,7 @@ export default async function ClassPage(props: {
       (typeof l.includeInMemory === "boolean" ? l.includeInMemory : true),
   }));
 
-  if (cls.syncEnabled && cls.syncKey) {
+  if ((cls as any).syncEnabled && cls.syncKey) {
     const synced = await db.lecture.findMany({
       where: { syncKey: cls.syncKey },
       orderBy: { createdAt: "desc" },
@@ -105,8 +104,15 @@ export default async function ClassPage(props: {
     );
   }
 
-  const initialTab: "chat" | "record" | "class" =
-    sp.tab === "class" ? "class" : sp.record === "1" ? "record" : "chat";
+  // Default to "home" unless a specific tab is requested
+  const initialTab: "home" | "chat" | "record" | "class" =
+    sp.tab === "class"
+      ? "class"
+      : sp.record === "1"
+      ? "record"
+      : sp.tab === "chat"
+      ? "chat"
+      : "home";
 
   return (
     <main className="h-screen w-full overflow-hidden flex bg-white">
@@ -120,6 +126,7 @@ export default async function ClassPage(props: {
           classId={cls.id}
           initialTab={initialTab}
           classTitle={cls.name}
+          lectures={mergedLectures} // for Main page lecture tiles
         />
       </section>
     </main>

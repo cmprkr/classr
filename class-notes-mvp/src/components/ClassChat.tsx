@@ -22,11 +22,13 @@ export default function ClassChat({
   const footerRef = useRef<HTMLDivElement>(null);
   const [footerH, setFooterH] = useState(0);
 
-  // Back button behavior matches LectureSummaryPage
+  // Back → MAIN PAGE (clear summary + tab/record params)
   function goBack() {
     const currentParams = new URLSearchParams(searchParams.toString());
     currentParams.delete("view");
     currentParams.delete("lectureId");
+    currentParams.delete("tab");
+    currentParams.delete("record");
     const qs = currentParams.toString();
     router.push(qs ? `/class/${classId}?${qs}` : `/class/${classId}`);
   }
@@ -114,7 +116,7 @@ export default function ClassChat({
 
   return (
     <section className="flex h-full w-full flex-col bg-white">
-      {/* Header (same style as LectureSummaryPage): Back button + thin divider */}
+      {/* Header: Back + title */}
       <div className="px-4 py-4 border-b border-gray-200 flex items-center gap-3">
         <button
           onClick={goBack}

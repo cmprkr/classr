@@ -125,10 +125,13 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  // Back → MAIN PAGE (clear summary + tab/record params)
   function goBack() {
     const currentParams = new URLSearchParams(searchParams.toString());
     currentParams.delete("view");
     currentParams.delete("lectureId");
+    currentParams.delete("tab");
+    currentParams.delete("record");
     const qs = currentParams.toString();
     router.push(qs ? `/class/${classId}?${qs}` : `/class/${classId}`);
   }
@@ -138,7 +141,7 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
   const [error, setError] = useState<string | null>(null);
 
   const [name, setName] = useState("");
-  const [syncEnabled, setSyncEnabled] = useState(false);
+  const [syncEnabled, setSyncEnabled] = useState(false); // ← fixed (removed stray "the")
   const [syncKey, setSyncKey] = useState<string>("");
   const [isActive, setIsActive] = useState(true);
 
@@ -278,7 +281,7 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
     return () => {
       mounted = false;
     };
-  }, [syncEnabled, selectedSchoolDomain]); // intentionally not clearing syncKey here
+  }, [syncEnabled, selectedSchoolDomain]);
 
   // restore school + class from existing syncKey (on first load)
   useEffect(() => {
@@ -417,7 +420,7 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
 
   return (
     <section className="flex h-full w-full flex-col bg-white">
-      {/* Header (match ClassChat): Back button + thin divider */}
+      {/* Header: Back button + thin divider */}
       <div className="px-4 py-4 border-b border-gray-200 flex items-center gap-3">
         <button
           onClick={goBack}

@@ -1,6 +1,6 @@
 // src/components/AllClassesPanel.tsx
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type Klass = {
@@ -9,7 +9,7 @@ type Klass = {
   createdAt: string;
   syncKey?: string | null;
   scheduleJson?: any | null; // must be returned by /api/classes
-  isActive?: boolean;        // ✅ new: used for the Active/Inactive tag
+  isActive?: boolean;        // used for the Active/Inactive tag and toggle
 };
 
 type DayKey = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
@@ -85,6 +85,64 @@ function formatSchedule(s: any): string {
   return range ? `${dayText} ${range}` : dayText;
 }
 
+/* ---------- Sorting helpers (restored) ---------- */
+function isHHMM(v: any): v is string {
+  return typeof v === "string" && /^\d{2}:\d{2}$/.test(v);
+}
+function hhmmToMinutes(hhmm: string): number {
+  const [h, m] = hhmm.split(":").map((n) => parseInt(n, 10));
+  return h * 60 + m;
+}
+/** Earliest start (in minutes) or null if none/invalid */
+function earliestStartFromSchedule(s: any): number | null {
+  if (!s || typeof s !== "object") return null;
+  const days: DayKey[] = Array.isArray(s.days)
+    ? (s.days.filter((d: any): d is DayKey => ALL_DAYS.includes(d)) as DayKey[])
+    : [];
+
+  if (s.mode === "per-day") {
+    if (!s.perDay || typeof s.perDay !== "object" || days.length === 0) return null;
+    const mins: number[] = [];
+    for (const d of days) {
+      const start = s.perDay?.[d]?.start;
+      if (isHHMM(start)) mins.push(hhmmToMinutes(start));
+    }
+    return mins.length ? Math.min(...mins) : null;
+  }
+
+  const start = s?.uniform?.start;
+  return isHHMM(start) ? hhmmToMinutes(start) : null;
+}
+
+/** Sort:
+ * 1) Active (true/undefined) above inactive (false)
+ * 2) Within active: classes with a schedule first by earliest start; others alphabetical
+ * 3) Inactive: alphabetical
+ */
+function compareClasses(a: Klass, b: Klass): number {
+  const aActive = a.isActive !== false;
+  const bActive = b.isActive !== false;
+  if (aActive !== bActive) return aActive ? -1 : 1;
+
+  if (aActive && bActive) {
+    const aStart = earliestStartFromSchedule(a.scheduleJson);
+    const bStart = earliestStartFromSchedule(b.scheduleJson);
+    const aHas = aStart !== null;
+    const bHas = bStart !== null;
+
+    if (aHas && !bHas) return -1;
+    if (!aHas && bHas) return 1;
+    if (aHas && bHas) {
+      if (aStart! !== bStart!) return aStart! - bStart!;
+      return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+    }
+    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  }
+
+  // both inactive → alphabetical
+  return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+}
+
 export default function AllClassesPanel() {
   const router = useRouter();
   const [classes, setClasses] = useState<Klass[]>([]);
@@ -126,10 +184,29 @@ export default function AllClassesPanel() {
     router.push(`/class/${id}?tab=class`);
   }
 
+  // active/inactive toggle (kept)
+  async function toggleActive(id: string, nextVal: boolean) {
+    setClasses((prev) => prev.map((c) => (c.id === id ? { ...c, isActive: nextVal } : c)));
+    try {
+      const r = await fetch(`/api/classes/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: nextVal }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+    } catch {
+      setClasses((prev) => prev.map((c) => (c.id === id ? { ...c, isActive: !nextVal } : c)));
+      alert("Failed to update class status. Please try again.");
+    }
+  }
+
+  // ✅ restore ordering
+  const sortedClasses = useMemo(() => [...classes].sort(compareClasses), [classes]);
+
   return (
     <section className="w-96 bg-white border-r overflow-y-auto p-4 space-y-3">
       <h2 className="text-lg font-semibold text-black border-b pb-2 mb-2">
-        All Classes ({classes.length})
+        All Classes ({sortedClasses.length})
       </h2>
 
       <div className="flex gap-2">
@@ -145,9 +222,9 @@ export default function AllClassesPanel() {
       </div>
 
       <div className="space-y-2">
-        {classes.map((c) => {
+        {sortedClasses.map((c) => {
           const isSynced = !!c.syncKey;
-          const active = c.isActive ?? true; // default to active if undefined
+          const active = c.isActive ?? true;
           const cardBase = "p-3 rounded-lg border flex items-start justify-between gap-3";
           const syncedBg =
             "bg-gradient-to-r from-indigo-50 via-fuchsia-50 to-pink-50 hover:from-indigo-100 hover:via-fuchsia-100 hover:to-pink-100 border-fuchsia-200";
@@ -178,7 +255,6 @@ export default function AllClassesPanel() {
 
                 {/* Row 4: badges (Active/Inactive first, then Synced) */}
                 <div className="text-xs mt-1 text-gray-600 flex gap-2">
-                  {/* Active/Inactive (leftmost) */}
                   {active ? (
                     <span className="inline-block rounded-full text-[10px] px-2 py-0.5 bg-green-100 text-green-700 border border-green-200">
                       Active
@@ -188,8 +264,6 @@ export default function AllClassesPanel() {
                       Inactive
                     </span>
                   )}
-
-                  {/* Synced tag (optional) */}
                   {isSynced && (
                     <span className="inline-block rounded-full text-[10px] px-2 py-0.5 bg-pink-100 text-pink-700 border border-pink-200">
                       Synced
@@ -198,11 +272,25 @@ export default function AllClassesPanel() {
                 </div>
               </a>
 
-              {/* Right: actions */}
+              {/* Right: actions — includes the third toggle svg on the LEFT */}
               <div
                 className="flex items-center gap-1.5"
                 onClick={(e) => e.stopPropagation()}
               >
+                <button
+                  type="button"
+                  onClick={() => toggleActive(c.id, !active)}
+                  className="p-2 rounded hover:bg-white"
+                  title={active ? "Mark inactive" : "Mark active"}
+                  aria-label={active ? "Mark inactive" : "Mark active"}
+                >
+                  <img
+                    src={active ? "/icons/hexagon-check.svg" : "/icons/hexagon-exclamation.svg"}
+                    alt={active ? "Active" : "Inactive"}
+                    className="w-4 h-4"
+                  />
+                </button>
+
                 <button
                   type="button"
                   onClick={() => goToSettings(c.id)}
