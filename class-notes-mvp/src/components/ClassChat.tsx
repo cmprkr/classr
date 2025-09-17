@@ -4,6 +4,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+type ChatMsg = {
+  role: "user" | "assistant" | "system";
+  content: string;
+  citations?: any;
+  createdAt?: string;
+  typing?: boolean; // local-only for UI
+};
+
 export default function ClassChat({
   classId,
   classTitle,
@@ -15,14 +23,13 @@ export default function ClassChat({
   const searchParams = useSearchParams();
 
   const [msg, setMsg] = useState("");
-  const [history, setHistory] = useState<any[]>([]);
+  const [history, setHistory] = useState<ChatMsg[]>([]);
   const [isComposing, setIsComposing] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const footerRef = useRef<HTMLDivElement>(null);
   const [footerH, setFooterH] = useState(0);
 
-  // Back → MAIN PAGE (clear summary + tab/record params)
   function goBack() {
     const currentParams = new URLSearchParams(searchParams.toString());
     currentParams.delete("view");
@@ -33,7 +40,7 @@ export default function ClassChat({
     router.push(qs ? `/class/${classId}?${qs}` : `/class/${classId}`);
   }
 
-  // Measure sticky footer
+  // Sticky footer measurement
   useEffect(() => {
     if (!footerRef.current) return;
     const el = footerRef.current;
@@ -56,7 +63,16 @@ export default function ClassChat({
 
   async function load() {
     const c = await fetch(`/api/classes/${classId}`).then((r) => r.json());
-    setHistory(c.chats || []);
+    // Expect shape: { id, name, chats: [...] }
+    const chats = Array.isArray(c?.chats) ? c.chats : [];
+    setHistory(
+      chats.map((m: any) => ({
+        role: m.role,
+        content: m.content,
+        citations: m.citations ? safeParse(m.citations) : undefined,
+        createdAt: m.createdAt,
+      }))
+    );
     scrollToBottom("auto");
   }
 
@@ -68,15 +84,31 @@ export default function ClassChat({
     if (history.length) scrollToBottom("smooth");
   }, [history]);
 
+  function safeParse(x: any) {
+    if (typeof x === "string") {
+      try { return JSON.parse(x); } catch { return undefined; }
+    }
+    return x;
+  }
+
   async function send() {
     const text = msg.trim();
     if (!text) return;
+
+    // optimistic user message
     setMsg("");
     setHistory((h) => [
       ...h,
       { role: "user", content: text, createdAt: new Date().toISOString() },
     ]);
+
+    // add typing placeholder (assistant)
+    setHistory((h) => [
+      ...h,
+      { role: "assistant", content: "", typing: true, createdAt: new Date().toISOString() },
+    ]);
     scrollToBottom("smooth");
+
     try {
       const r = await fetch(`/api/classes/${classId}/chat`, {
         method: "POST",
@@ -84,24 +116,47 @@ export default function ClassChat({
         body: JSON.stringify({ message: text }),
       });
       const data = await r.json();
-      setHistory((h) => [
-        ...h,
-        {
-          role: "assistant",
-          content: data.answer,
-          citations: data.citations,
-          createdAt: new Date().toISOString(),
-        },
-      ]);
+
+      // replace the current typing bubble with the real assistant message
+      setHistory((h) => {
+        const idx = h.findIndex((m) => m.typing && m.role === "assistant");
+        if (idx >= 0) {
+          const next = h.slice();
+          next[idx] = {
+            role: "assistant",
+            content: data.answer,
+            citations: data.citations,
+            createdAt: new Date().toISOString(),
+          };
+          return next;
+        }
+        // fallback: append if somehow not found
+        return [
+          ...h,
+          {
+            role: "assistant",
+            content: data.answer,
+            citations: data.citations,
+            createdAt: new Date().toISOString(),
+          },
+        ];
+      });
     } catch {
-      setHistory((h) => [
-        ...h,
-        {
+      // replace typing bubble with error
+      setHistory((h) => {
+        const idx = h.findIndex((m) => m.typing && m.role === "assistant");
+        const errorMsg: ChatMsg = {
           role: "system",
           content: "Sorry—message failed to send.",
           createdAt: new Date().toISOString(),
-        },
-      ]);
+        };
+        if (idx >= 0) {
+          const next = h.slice();
+          next[idx] = errorMsg;
+          return next;
+        }
+        return [...h, errorMsg];
+      });
     } finally {
       scrollToBottom("smooth");
     }
@@ -116,7 +171,7 @@ export default function ClassChat({
 
   return (
     <section className="flex h-full w-full flex-col bg-white">
-      {/* Header: Back + title */}
+      {/* Header */}
       <div className="px-4 py-4 border-b border-gray-200 flex items-center gap-3">
         <button
           onClick={goBack}
@@ -124,15 +179,14 @@ export default function ClassChat({
         >
           Back
         </button>
-        <h1 className="text-sm font-semibold text-black truncate">
-          {classTitle} - Chat
-        </h1>
+        <h1 className="text-sm font-semibold text-black truncate">Chat</h1>
       </div>
 
       {/* Messages area */}
       <div className="flex-1 overflow-auto space-y-3 px-4 py-3">
         {history.map((m, i) => {
           const isUser = m.role === "user";
+          const isTyping = !!m.typing && m.role === "assistant";
           return (
             <div key={i} className={isUser ? "text-right" : ""}>
               <div
@@ -143,11 +197,22 @@ export default function ClassChat({
                     : "bg-gray-100 text-black",
                 ].join(" ")}
               >
-                <div className="whitespace-pre-wrap">{m.content}</div>
-                {m.citations && (
-                  <div className="text-xs opacity-70 mt-1">
-                    Cites: {m.citations.length} chunks
+                {isTyping ? (
+                  <div className="flex items-center gap-1">
+                    <span className="sr-only">Assistant is typing…</span>
+                    <span className="dot" />
+                    <span className="dot" />
+                    <span className="dot" />
                   </div>
+                ) : (
+                  <>
+                    <div className="whitespace-pre-wrap">{m.content}</div>
+                    {m.citations && (
+                      <div className="text-xs opacity-70 mt-1">
+                        Cites: {m.citations.length} chunks
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -182,6 +247,26 @@ export default function ClassChat({
           </button>
         </div>
       </div>
+
+      {/* local styles for typing dots */}
+      <style jsx>{`
+        .dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 9999px;
+          background: rgba(0, 0, 0, 0.6);
+          display: inline-block;
+          animation: bounce 1.2s infinite ease-in-out;
+        }
+        .dot:nth-child(1) { animation-delay: 0s; }
+        .dot:nth-child(2) { animation-delay: 0.15s; }
+        .dot:nth-child(3) { animation-delay: 0.3s; }
+
+        @keyframes bounce {
+          0%, 60%, 100% { transform: translateY(0); opacity: 0.6; }
+          30% { transform: translateY(-4px); opacity: 1; }
+        }
+      `}</style>
     </section>
   );
 }

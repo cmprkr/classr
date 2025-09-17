@@ -1,3 +1,4 @@
+// src/app/api/classes/[classId]/chat/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";

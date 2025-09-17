@@ -53,6 +53,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ lectureId: str
         select: {
           userId: true,
           scheduleJson: true,
+          isActive: true, // ⬅️ add this
           user: { select: { id: true, name: true, username: true } },
         },
       },
@@ -81,6 +82,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ lectureId: str
     // ✅ return the lecture creator as uploader; fallback to class owner if null
     uploader: lec.user ?? lec.clazz.user,
     uploaderScheduleJson: lec.clazz.scheduleJson,
+    clazzIsActive: lec.clazz.isActive, // ⬅️ add this
   });
 }
 

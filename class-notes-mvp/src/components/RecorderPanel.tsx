@@ -281,7 +281,7 @@ export default function RecorderPanel() {
 
   // ---- Header helpers (class layer only) ----
   const classTitle =
-    (classes.find((c) => c.id === classIdInPath)?.name || "Class") + " - Recording";
+    "Recording";
 
   function goBackToMain() {
     if (!inClassLayer) return;

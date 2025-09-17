@@ -77,8 +77,18 @@ export async function GET(_req: Request, ctx: { params: Promise<{ classId: strin
       name: true,
       syncEnabled: true,
       syncKey: true,
-      scheduleJson: true, // ✅ include schedule
-      isActive: true,     // ✅ include active flag
+      scheduleJson: true,
+      isActive: true,
+      chats: {                                   // ⬅️ add this block
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          role: true,
+          content: true,
+          citations: true,
+          createdAt: true,
+        },
+      },
     },
   });
   if (!clazz) return NextResponse.json({ error: "not found" }, { status: 404 });

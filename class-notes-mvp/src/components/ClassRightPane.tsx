@@ -93,7 +93,7 @@ export default function ClassRightPane({
         <div className="h-full w-full flex flex-col bg-white">
           <div className="px-4 py-4 border-b border-gray-200 flex items-center justify-between">
             <h1 className="text-sm font-semibold text-black truncate">
-              {classTitle} — Main
+              Main
             </h1>
             {/* Invisible Back button placeholder */}
             <button
