@@ -123,7 +123,7 @@ export default function ClassChat({
           Back
         </button>
         <h1 className="text-sm font-semibold text-black truncate">
-          {classTitle}
+          {classTitle} - Chat
         </h1>
       </div>
 

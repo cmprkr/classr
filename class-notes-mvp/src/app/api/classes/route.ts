@@ -27,18 +27,21 @@ export async function POST(req: Request) {
     // accept JSON or form-encoded (defensive)
     let name = "";
     let scheduleJson: any = undefined;
+    let isActive: boolean | undefined = undefined; // ✅ new
 
     const ctype = req.headers.get("content-type") || "";
     if (ctype.includes("application/json")) {
       const body = await req.json().catch(() => ({}));
       name = (body?.name ?? "").trim();
       scheduleJson = body?.scheduleJson ?? undefined;
+      if (typeof body?.isActive === "boolean") isActive = body.isActive; // ✅
     } else if (
       ctype.includes("application/x-www-form-urlencoded") ||
       ctype.includes("multipart/form-data")
     ) {
       const fd = await req.formData();
       name = String(fd.get("name") || "").trim();
+
       const schedRaw = fd.get("scheduleJson");
       if (typeof schedRaw === "string" && schedRaw) {
         try {
@@ -47,10 +50,17 @@ export async function POST(req: Request) {
           scheduleJson = undefined;
         }
       }
+
+      const isActiveRaw = fd.get("isActive"); // ✅
+      if (typeof isActiveRaw === "string") {
+        // accept "true"/"false"
+        isActive = isActiveRaw === "true";
+      }
     } else {
       const body = await req.json().catch(() => ({}));
       name = (body?.name ?? "").trim();
       scheduleJson = body?.scheduleJson ?? undefined;
+      if (typeof body?.isActive === "boolean") isActive = body.isActive; // ✅
     }
 
     if (!name) {
@@ -58,7 +68,12 @@ export async function POST(req: Request) {
     }
 
     const created = await db.class.create({
-      data: { name, userId: user.id, scheduleJson: scheduleJson ?? undefined },
+      data: {
+        name,
+        userId: user.id,
+        scheduleJson: scheduleJson ?? undefined,
+        ...(isActive !== undefined ? { isActive } : {}), // ✅ default handled by prisma
+      },
     });
     return NextResponse.json(created);
   } catch (e: any) {

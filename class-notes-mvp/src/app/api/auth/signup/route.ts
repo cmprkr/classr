@@ -28,6 +28,8 @@ export async function POST(req: Request) {
     let email = "";
     let password = "";
     let username = "";
+    // NEW: optional default university domain
+    let defaultUniversityDomain: string | null = null;
 
     if (ctype.includes("application/json")) {
       const body = (await req.json().catch(() => ({}))) as any;
@@ -35,6 +37,8 @@ export async function POST(req: Request) {
       email = (body?.email ?? "").trim().toLowerCase();
       password = (body?.password ?? "").trim();
       username = (body?.username ?? "").trim();
+      const dom = (body?.defaultUniversityDomain ?? "").trim().toLowerCase();
+      defaultUniversityDomain = dom ? dom : null;
     } else if (
       ctype.includes("application/x-www-form-urlencoded") ||
       ctype.includes("multipart/form-data")
@@ -44,13 +48,16 @@ export async function POST(req: Request) {
       email = getStr(fd.get("email")).toLowerCase();
       password = getStr(fd.get("password"));
       username = getStr(fd.get("username"));
+      const dom = getStr(fd.get("defaultUniversityDomain")).toLowerCase();
+      defaultUniversityDomain = dom ? dom : null;
     } else {
-      // Fallback: try JSON anyway
       const body = (await req.json().catch(() => ({}))) as any;
       name = (body?.name ?? "").trim();
       email = (body?.email ?? "").trim().toLowerCase();
       password = (body?.password ?? "").trim();
       username = (body?.username ?? "").trim();
+      const dom = (body?.defaultUniversityDomain ?? "").trim().toLowerCase();
+      defaultUniversityDomain = dom ? dom : null;
     }
 
     if (!email || !password || !username) {
@@ -76,10 +83,10 @@ export async function POST(req: Request) {
         email,
         username,
         passwordHash,
+        defaultUniversityDomain, // ✅ optional
       },
     });
 
-    // Success → send them to sign in
     return okRedirect(req);
   } catch (e: any) {
     console.error("signup error:", e?.message || e);

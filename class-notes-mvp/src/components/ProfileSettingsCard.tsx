@@ -1,7 +1,11 @@
 // src/components/ProfileSettingsCard.tsx
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+
+// Same list used in ClassSettings
+import institutions from "data/institutions";
+type Institution = (typeof institutions)[number];
 
 type UserLite = {
   id: string | null;
@@ -24,17 +28,40 @@ export default function ProfileSettingsCard({
   const [previewUrl, setPreviewUrl] = useState<string | null>(user.image || null);
   const [busy, setBusy] = useState(false);
 
-  console.log("User data in ProfileSettingsCard:", {
-    id: user.id,
-    username: user.username,
-    email: user.email,
-    name: user.name,
-  });
+  // NEW: default university (primary domain)
+  const [defaultUniversityDomain, setDefaultUniversityDomain] = useState<string>("");
+
+  // Load current user defaults (domain) on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/me");
+        if (!r.ok) return;
+        const me = await r.json();
+        const dom = (me?.defaultUniversityDomain || "").toLowerCase();
+        if (dom) setDefaultUniversityDomain(dom);
+      } catch {}
+    })();
+  }, []);
 
   const initial = useMemo(() => {
     const src = (name || user.username || user.email || " ").trim();
     return src ? src[0]!.toUpperCase() : "U";
   }, [name, user.username, user.email]);
+
+  const schoolOptions = useMemo(() => {
+    return institutions
+      .map((s) => {
+        const domain = (s.domains?.[0] || "").toLowerCase();
+        if (!domain) return null;
+        return { value: domain, label: `${s.name} — ${domain}` };
+      })
+      .filter(Boolean)
+      .sort((a, b) => (a!.label as string).localeCompare(b!.label)) as Array<{
+      value: string;
+      label: string;
+    }>;
+  }, []);
 
   async function saveProfile() {
     if (busy || !isSignedIn) return;
@@ -49,13 +76,18 @@ export default function ProfileSettingsCard({
         setPreviewUrl(data.imageUrl);
         setPfpFile(null);
       }
+
+      // Name + defaultUniversityDomain are both optional; PATCH will accept either/both
       const response = await fetch("/api/me", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({
+          name,
+          defaultUniversityDomain: defaultUniversityDomain || null,
+        }),
       });
       if (!response.ok) {
-        console.warn("Name PATCH failed:", await response.text());
+        console.warn("Profile PATCH failed:", await response.text());
       }
       router.refresh();
     } catch (e) {
@@ -70,6 +102,15 @@ export default function ProfileSettingsCard({
     setPfpFile(null);
     setPreviewUrl(user.image || null);
     setName(user.name ?? "");
+    // Reset default uni by refetching
+    setDefaultUniversityDomain("");
+    fetch("/api/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((me) => {
+        const dom = (me?.defaultUniversityDomain || "").toLowerCase();
+        if (dom) setDefaultUniversityDomain(dom);
+      })
+      .catch(() => {});
   }
 
   function submitSignOut() {
@@ -109,7 +150,7 @@ export default function ProfileSettingsCard({
         <div className="grid gap-6 md:gap-8">
           <section className="rounded-2xl border bg-white p-5 sm:p-6">
             <header className="mb-3">
-              <h2 className="text-lg font-semibold text-black">Profile Picture</h2>
+              <h2 className="text-lg font-semibold text-black">Profile</h2>
             </header>
             <div className="text-black">
               <div className="flex flex-col sm:flex-row items-start gap-5">
@@ -168,6 +209,30 @@ export default function ProfileSettingsCard({
                       className="mt-1 w-full rounded-lg border px-3 py-2 bg-gray-100 text-gray-500 cursor-not-allowed"
                     />
                   </div>
+
+                  {/* NEW: Default university selection */}
+                  <div className="mt-4">
+                    <label className="block text-sm font-medium text-black">
+                      Default University (optional)
+                    </label>
+                    <select
+                      className="mt-1 w-full rounded-lg border px-3 py-2 bg-white text-black"
+                      value={defaultUniversityDomain}
+                      onChange={(e) => setDefaultUniversityDomain(e.target.value)}
+                      disabled={busy || !isSignedIn}
+                    >
+                      <option value="">— None —</option>
+                      {schoolOptions.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-600 mt-1">
+                      This pre-fills the school when you enable sync on new classes. You can still change it per class.
+                    </p>
+                  </div>
+
                   <div className="mt-4 flex gap-3">
                     <button
                       type="button"

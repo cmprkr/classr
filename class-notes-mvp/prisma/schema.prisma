@@ -15,6 +15,10 @@ model User {
   emailVerified DateTime?
   image         String?
   passwordHash  String?
+
+  // NEW: user's default university (primary domain from institutions list)
+  defaultUniversityDomain String?
+
   classes       Class[]
   chats         ChatMessage[]
   lectures      Lecture[]
@@ -76,6 +80,9 @@ model Class {
 
   // serialized schedule config
   scheduleJson Json?
+
+  // whether the user is actively taking this class
+  isActive    Boolean    @default(true)
 }
 
 enum ResourceType {
@@ -115,7 +122,7 @@ model Lecture {
   includeInMemory Boolean      @default(true)
   includeInMemoryUser Json?
 
-  // NEW: per-user prefs relation
+  // per-user prefs relation
   userPrefs       LectureUserPref[]
 
   @@index([syncKey])
@@ -133,7 +140,6 @@ model LectureUserPref {
   @@id([lectureId, userId])
 }
 
-
 model Chunk {
   id        String   @id @default(cuid())
   classId   String
@@ -142,7 +148,7 @@ model Chunk {
   startSec  Int
   endSec    Int
   text      String
-  vectorJson String   @default("")   // ⬅️ add this
+  vectorJson String   @default("")
   createdAt DateTime @default(now())
   clazz     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
   lecture   Lecture  @relation(fields: [lectureId], references: [id], onDelete: Cascade)

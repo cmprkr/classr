@@ -9,6 +9,7 @@ type Klass = {
   createdAt: string;
   syncKey?: string | null;
   scheduleJson?: any | null; // must be returned by /api/classes
+  isActive?: boolean;        // ✅ new: used for the Active/Inactive tag
 };
 
 type DayKey = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
@@ -146,6 +147,7 @@ export default function AllClassesPanel() {
       <div className="space-y-2">
         {classes.map((c) => {
           const isSynced = !!c.syncKey;
+          const active = c.isActive ?? true; // default to active if undefined
           const cardBase = "p-3 rounded-lg border flex items-start justify-between gap-3";
           const syncedBg =
             "bg-gradient-to-r from-indigo-50 via-fuchsia-50 to-pink-50 hover:from-indigo-100 hover:via-fuchsia-100 hover:to-pink-100 border-fuchsia-200";
@@ -174,14 +176,26 @@ export default function AllClassesPanel() {
                   <div className="text-xs text-gray-700 mt-0.5 truncate">{scheduleText}</div>
                 )}
 
-                {/* Row 4: badges (bottom row, like LectureItem) */}
-                {isSynced && (
-                  <div className="text-xs mt-1 text-gray-600 flex gap-2">
+                {/* Row 4: badges (Active/Inactive first, then Synced) */}
+                <div className="text-xs mt-1 text-gray-600 flex gap-2">
+                  {/* Active/Inactive (leftmost) */}
+                  {active ? (
+                    <span className="inline-block rounded-full text-[10px] px-2 py-0.5 bg-green-100 text-green-700 border border-green-200">
+                      Active
+                    </span>
+                  ) : (
+                    <span className="inline-block rounded-full text-[10px] px-2 py-0.5 bg-orange-100 text-orange-700 border border-orange-200">
+                      Inactive
+                    </span>
+                  )}
+
+                  {/* Synced tag (optional) */}
+                  {isSynced && (
                     <span className="inline-block rounded-full text-[10px] px-2 py-0.5 bg-pink-100 text-pink-700 border border-pink-200">
                       Synced
                     </span>
-                  </div>
-                )}
+                  )}
+                </div>
               </a>
 
               {/* Right: actions */}

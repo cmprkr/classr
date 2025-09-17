@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 // Readonly data with `as const`
 import institutions from "data/institutions";
@@ -15,7 +15,8 @@ type Klass = {
   name: string;
   syncEnabled?: boolean;
   syncKey?: string | null;
-  scheduleJson?: any | null; // server returns this as-is
+  scheduleJson?: any | null;
+  isActive?: boolean;
 };
 
 // ---------- helpers ----------
@@ -73,9 +74,7 @@ async function resolveInstitutionBySyncKey(
           options: list.map((c) => ({ value: c.syncKey, label: `${c.code} — ${c.name}` })),
         };
       }
-    } catch {
-      // ignore; not every institution will have a classes file yet
-    }
+    } catch {}
   }
   return null;
 }
@@ -93,19 +92,10 @@ type ClassSchedule =
   | { days: DayKey[]; mode: "per-day"; perDay?: SchedulePerDay };
 
 function toClassSchedule(raw: any): ClassSchedule {
-  // basic sanitize
   const daysRaw = Array.isArray(raw?.days) ? raw.days : [];
   const days = daysRaw.filter((d: any): d is DayKey => ALL_DAYS.includes(d));
   if (raw?.mode === "per-day") {
-    const per: SchedulePerDay = {
-      Mon: {},
-      Tue: {},
-      Wed: {},
-      Thu: {},
-      Fri: {},
-      Sat: {},
-      Sun: {},
-    };
+    const per: SchedulePerDay = { Mon: {}, Tue: {}, Wed: {}, Thu: {}, Fri: {}, Sat: {}, Sun: {} };
     for (const d of days) {
       const ent = raw?.perDay?.[d] || {};
       per[d as DayKey] = {
@@ -115,7 +105,6 @@ function toClassSchedule(raw: any): ClassSchedule {
     }
     return { days, mode: "per-day", perDay: Object.keys(per).length ? per : undefined };
   }
-  // default uniform
   const uniform = {
     start: typeof raw?.uniform?.start === "string" ? raw.uniform.start : undefined,
     end: typeof raw?.uniform?.end === "string" ? raw.uniform.end : undefined,
@@ -134,6 +123,15 @@ function timeValid(v?: string) {
 // ---------- component ----------
 export default function ClassSettingsPanel({ classId }: { classId: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  function goBack() {
+    const currentParams = new URLSearchParams(searchParams.toString());
+    currentParams.delete("view");
+    currentParams.delete("lectureId");
+    const qs = currentParams.toString();
+    router.push(qs ? `/class/${classId}?${qs}` : `/class/${classId}`);
+  }
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -142,6 +140,10 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
   const [name, setName] = useState("");
   const [syncEnabled, setSyncEnabled] = useState(false);
   const [syncKey, setSyncKey] = useState<string>("");
+  const [isActive, setIsActive] = useState(true);
+
+  // NEW: user's default university domain (from /api/me)
+  const [userDefaultUni, setUserDefaultUni] = useState<string>("");
 
   // school + dynamic classes
   const [selectedSchoolDomain, setSelectedSchoolDomain] = useState<string>("");
@@ -164,6 +166,19 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
     Sun: {},
   });
 
+  // Load user default uni first (doesn't block class fetch)
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/me");
+        if (!r.ok) return;
+        const me = await r.json();
+        const dom = (me?.defaultUniversityDomain || "").toLowerCase();
+        setUserDefaultUni(dom || "");
+      } catch {}
+    })();
+  }, []);
+
   // preload: GET /api/classes/[classId]
   useEffect(() => {
     let mounted = true;
@@ -180,26 +195,16 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
         const enabled = Boolean(data.syncEnabled);
         setSyncEnabled(enabled);
         setSyncKey((data.syncKey || "") as string);
+        setIsActive((data as any).isActive ?? true);
 
         // schedule
         const sched = toClassSchedule(data.scheduleJson);
         setDays(new Set<DayKey>(sched.days || []));
         if (sched.mode === "per-day") {
           setSameTimeAll(false);
-          const pd: SchedulePerDay = {
-            Mon: {},
-            Tue: {},
-            Wed: {},
-            Thu: {},
-            Fri: {},
-            Sat: {},
-            Sun: {},
-          };
+          const pd: SchedulePerDay = { Mon: {}, Tue: {}, Wed: {}, Thu: {}, Fri: {}, Sat: {}, Sun: {} };
           for (const d of ALL_DAYS) {
-            pd[d] = {
-              start: sched.perDay?.[d]?.start,
-              end: sched.perDay?.[d]?.end,
-            };
+            pd[d] = { start: sched.perDay?.[d]?.start, end: sched.perDay?.[d]?.end };
           }
           setPerDay(pd);
         } else {
@@ -229,6 +234,13 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
       .filter(Boolean) as Array<{ value: string; label: string }>;
     return items.sort((a, b) => a.label.localeCompare(b.label));
   }, []);
+
+  // When sync turns on and no school chosen yet, auto-fill from user default
+  useEffect(() => {
+    if (syncEnabled && !selectedSchoolDomain && userDefaultUni) {
+      setSelectedSchoolDomain(userDefaultUni);
+    }
+  }, [syncEnabled, selectedSchoolDomain, userDefaultUni]);
 
   // when selecting a school while sync is enabled, load its classes
   useEffect(() => {
@@ -326,15 +338,7 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
         },
       };
     }
-    const per: SchedulePerDay = {
-      Mon: {},
-      Tue: {},
-      Wed: {},
-      Thu: {},
-      Fri: {},
-      Sat: {},
-      Sun: {},
-    };
+    const per: SchedulePerDay = { Mon: {}, Tue: {}, Wed: {}, Thu: {}, Fri: {}, Sat: {}, Sun: {} };
     for (const d of ALL_DAYS) {
       if (!selected.includes(d)) continue;
       per[d] = {
@@ -359,7 +363,8 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
           name: trimmed,
           syncEnabled,
           syncKey: syncEnabled ? (syncKey || null) : null,
-          scheduleJson, // ✅ send schedule to server
+          scheduleJson,
+          isActive,
         }),
       });
       if (!r.ok) throw new Error(await r.text());
@@ -395,272 +400,284 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
 
   // Validation pieces
   const daysSelected = days.size > 0;
-
-  // strict time validation (does NOT allow "no days")
   const timesValidStrict =
     sameTimeAll
       ? timeValid(uniformStart) && timeValid(uniformEnd)
       : Array.from(days).every((d) => timeValid(perDay[d]?.start) && timeValid(perDay[d]?.end));
-
-  // overall schedule readiness: at least one day AND valid times
   const scheduleReady = daysSelected && timesValidStrict;
-
-  // your existing relaxed validation (used for the red hint)
   const timesValid =
     !daysSelected ||
     (sameTimeAll
       ? timeValid(uniformStart) && timeValid(uniformEnd)
       : Array.from(days).every((d) => timeValid(perDay[d]?.start) && timeValid(perDay[d]?.end)));
-
   const saveDisabled =
     !name.trim() ||
     saving ||
-    // if syncing, require school, class, AND a ready schedule
     (syncEnabled && (!selectedSchoolDomain || !syncKey || !scheduleReady));
 
   return (
-    <section className="relative h-full w-full overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-br from-indigo-200 via-fuchsia-200 to-pink-200" />
-      <div className="relative h-full w-full flex items-center justify-center p-6">
-        <div className="w-full max-w-2xl">
-          <div className="rounded-2xl bg-white shadow-xl ring-1 ring-black/5 p-6 sm:p-8 space-y-6">
-            <div className="flex items-center justify-between">
-              <h1 className="text-2xl font-semibold text-gray-900">Class settings</h1>
+    <section className="flex h-full w-full flex-col bg-white">
+      {/* Header (match ClassChat): Back button + thin divider */}
+      <div className="px-4 py-4 border-b border-gray-200 flex items-center gap-3">
+        <button
+          onClick={goBack}
+          className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-black hover:bg-gray-100 cursor-pointer"
+        >
+          Back
+        </button>
+        <h1 className="text-sm font-semibold text-black truncate">Settings</h1>
+      </div>
+
+      {/* Scrollable content area */}
+      <div className="flex-1 overflow-auto px-4 py-4 space-y-6">
+        {loading ? (
+          <div className="text-sm text-gray-600">Loading…</div>
+        ) : (
+          <>
+            {/* Class name */}
+            <div>
+              <label className="block text-sm text-gray-700 mb-1">Class name</label>
+              <input
+                className="w-full rounded-lg border px-3 py-2 text-black bg-white"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+              <div className="text-xs text-gray-500 mt-1">
+                This updates the class title everywhere.
+              </div>
             </div>
 
-            {loading ? (
-              <div className="text-sm text-gray-600">Loading…</div>
-            ) : (
-              <>
-                {/* Class name */}
-                <div>
-                  <label className="block text-sm text-gray-700 mb-1">Class name</label>
-                  <input
-                    className="w-full rounded-lg border px-3 py-2 text-black"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                  />
-                  <div className="text-xs text-gray-500 mt-1">
-                    This updates the class title everywhere.
-                  </div>
-                </div>
+            {/* Active status */}
+            <div>
+              <label className="flex items-center gap-2 text-sm text-gray-900">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={isActive}
+                  onChange={(e) => setIsActive(e.target.checked)}
+                />
+                Currently taking this class
+              </label>
+              <p className="text-xs text-gray-500 mt-1">
+                Uncheck if this is past, paused, or dropped.
+              </p>
+            </div>
 
-                {/* Sync with University */}
-                <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-sm text-gray-900">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4"
-                      checked={syncEnabled}
-                      onChange={(e) => {
-                        setSyncEnabled(e.target.checked);
-                        if (!e.target.checked) {
-                          setSelectedSchoolDomain("");
-                          setSyncKey("");
-                          setClassOptions([]);
-                          setClassesError(null);
-                        }
-                      }}
-                      // 🔒 Only allow turning ON when schedule is ready.
-                      //     Allow turning OFF anytime.
-                      disabled={!scheduleReady && !syncEnabled}
-                      title={
-                        !scheduleReady && !syncEnabled
-                          ? "Set a schedule (days + valid start/end times) to enable sync"
-                          : undefined
-                      }
-                    />
-                    Sync with University
-                    {!scheduleReady && !syncEnabled && (
-                      <span className="ml-2 rounded bg-yellow-100 text-yellow-800 px-2 py-0.5 text-xs">
-                        requires schedule
-                      </span>
-                    )}
-                  </label>
+            {/* Sync with University */}
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-sm text-gray-900">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={syncEnabled}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setSyncEnabled(next);
+                    if (next && !selectedSchoolDomain && userDefaultUni) {
+                      setSelectedSchoolDomain(userDefaultUni);
+                    }
+                    if (!next) {
+                      setSelectedSchoolDomain("");
+                      setSyncKey("");
+                      setClassOptions([]);
+                      setClassesError(null);
+                    }
+                  }}
+                  disabled={!scheduleReady && !syncEnabled}
+                  title={
+                    !scheduleReady && !syncEnabled
+                      ? "Set a schedule (days + valid start/end times) to enable sync"
+                      : undefined
+                  }
+                />
+                Sync with University
+                {!scheduleReady && !syncEnabled && (
+                  <span className="ml-2 rounded bg-yellow-100 text-yellow-800 px-2 py-0.5 text-xs">
+                    requires schedule
+                  </span>
+                )}
+              </label>
 
-                  {syncEnabled && (
-                    <div className="pl-6 space-y-4">
-                      {/* Choose school */}
-                      <div>
-                        <label className="block text-sm text-gray-700 mb-1">Choose school</label>
-                        <select
-                          className="w-full rounded-lg border px-3 py-2 text-black"
-                          value={selectedSchoolDomain}
-                          onChange={(e) => {
-                            setSelectedSchoolDomain(e.target.value);
-                            setSyncKey("");
-                          }}
-                        >
-                          <option value="">Select a school…</option>
-                          {schoolOptions.map((o) => (
-                            <option key={o.value} value={o.value}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
-                        <p className="text-xs text-gray-500 mt-2">
-                          Schools are sourced from <code>/data/institutions.ts</code>. Uniqueness by domain.
-                        </p>
-                      </div>
-
-                      {/* Choose university class */}
-                      <div>
-                        <label className="block text-sm text-gray-700 mb-1">Choose university class</label>
-                        <select
-                          className="w-full rounded-lg border px-3 py-2 text-black disabled:opacity-50"
-                          value={syncKey}
-                          onChange={(e) => setSyncKey(e.target.value)}
-                          disabled={!selectedSchoolDomain || loadingClasses || !!classesError}
-                        >
-                          <option value="">
-                            {loadingClasses
-                              ? "Loading classes…"
-                              : classesError
-                              ? "Unable to load classes"
-                              : "Select…"}
-                          </option>
-                          {classOptions.map((o) => (
-                            <option key={o.value} value={o.value}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
-
-                        {classesError ? (
-                          <p className="text-xs text-red-600 mt-2">{classesError}</p>
-                        ) : (
-                          <p className="text-xs text-gray-500 mt-2">
-                            When enabled, your current and future lecture items in this class will be
-                            shared under the selected university class. Other users who sync to the same
-                            class can see those items.
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Schedule */}
-                <div className="space-y-3">
-                  <h3 className="text-lg font-semibold text-gray-900">Schedule</h3>
-
-                  {/* Days selector */}
+              {syncEnabled && (
+                <div className="pl-0 sm:pl-2 space-y-4">
+                  {/* Choose school */}
                   <div>
-                    <label className="block text-sm text-gray-700 mb-1">Days of the week</label>
-                    <div className="flex flex-wrap gap-2">
-                      {ALL_DAYS.map((d) => (
-                        <label
-                          key={d}
-                          className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1 ${
-                            days.has(d) ? "bg-black text-white border-black" : "bg-white text-black"
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4"
-                            checked={days.has(d)}
-                            onChange={() => toggleDay(d)}
-                          />
-                          {d}
-                        </label>
+                    <label className="block text-sm text-gray-700 mb-1">Choose school</label>
+                    <select
+                      className="w-full rounded-lg border px-3 py-2 text-black bg-white"
+                      value={selectedSchoolDomain}
+                      onChange={(e) => {
+                        setSelectedSchoolDomain(e.target.value);
+                        setSyncKey("");
+                      }}
+                    >
+                      <option value="">Select a school…</option>
+                      {schoolOptions.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
                       ))}
-                    </div>
+                    </select>
+                    <p className="text-xs text-gray-500 mt-2">
+                      Defaults to your Account preference if set. You can change it per class.
+                    </p>
                   </div>
 
-                  {/* Same-time toggle */}
-                  <label className="flex items-center gap-2 text-sm text-gray-900">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4"
-                      checked={sameTimeAll}
-                      onChange={(e) => setSameTimeAll(e.target.checked)}
-                    />
-                    Same time for all selected days
-                  </label>
+                  {/* Choose university class */}
+                  <div>
+                    <label className="block text-sm text-gray-700 mb-1">Choose university class</label>
+                    <select
+                      className="w-full rounded-lg border px-3 py-2 text-black bg-white disabled:opacity-50"
+                      value={syncKey}
+                      onChange={(e) => setSyncKey(e.target.value)}
+                      disabled={!selectedSchoolDomain || loadingClasses || !!classesError}
+                    >
+                      <option value="">
+                        {loadingClasses
+                          ? "Loading classes…"
+                          : classesError
+                          ? "Unable to load classes"
+                          : "Select…"}
+                      </option>
+                      {classOptions.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
 
-                  {/* Times */}
-                  {sameTimeAll ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pl-0 sm:pl-2">
-                      <div>
-                        <label className="block text-sm text-gray-700 mb-1">Start time</label>
-                        <input
-                          type="time"
-                          value={uniformStart}
-                          onChange={(e) => setUniformStart(e.target.value)}
-                          className="w-full rounded-lg border px-3 py-2 text-black"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm text-gray-700 mb-1">End time</label>
-                        <input
-                          type="time"
-                          value={uniformEnd}
-                          onChange={(e) => setUniformEnd(e.target.value)}
-                          className="w-full rounded-lg border px-3 py-2 text-black"
-                        />
-                      </div>
-                      <p className="col-span-full text-xs text-gray-500">
-                        Times are local to America/Indiana/Indianapolis.
+                    {classesError ? (
+                      <p className="text-xs text-red-600 mt-2">{classesError}</p>
+                    ) : (
+                      <p className="text-xs text-gray-500 mt-2">
+                        When enabled, your current and future lecture items in this class will be
+                        shared under the selected university class. Other users who sync to the same
+                        class can see those items.
                       </p>
-                    </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Schedule */}
+            <div className="space-y-3">
+              <h3 className="text-lg font-semibold text-gray-900">Schedule</h3>
+
+              {/* Days selector */}
+              <div>
+                <label className="block text-sm text-gray-700 mb-1">Days of the week</label>
+                <div className="flex flex-wrap gap-2">
+                  {ALL_DAYS.map((d) => (
+                    <label
+                      key={d}
+                      className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1 ${
+                        days.has(d) ? "bg-black text-white border-black" : "bg-white text-black"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={days.has(d)}
+                        onChange={() => toggleDay(d)}
+                      />
+                      {d}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Same-time toggle */}
+              <label className="flex items-center gap-2 text-sm text-gray-900">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={sameTimeAll}
+                  onChange={(e) => setSameTimeAll(e.target.checked)}
+                />
+                Same time for all selected days
+              </label>
+
+              {/* Times */}
+              {sameTimeAll ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pl-0 sm:pl-2">
+                  <div>
+                    <label className="block text-sm text-gray-700 mb-1">Start time</label>
+                    <input
+                      type="time"
+                      value={uniformStart}
+                      onChange={(e) => setUniformStart(e.target.value)}
+                      className="w-full rounded-lg border px-3 py-2 text-black bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-700 mb-1">End time</label>
+                    <input
+                      type="time"
+                      value={uniformEnd}
+                      onChange={(e) => setUniformEnd(e.target.value)}
+                      className="w-full rounded-lg border px-3 py-2 text-black bg-white"
+                    />
+                  </div>
+                  <p className="col-span-full text-xs text-gray-500">
+                    Times are local to America/Indiana/Indianapolis.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2 pl-0 sm:pl-2">
+                  {ALL_DAYS.filter((d) => days.has(d)).length === 0 ? (
+                    <p className="text-sm text-gray-600">Select at least one day to set times.</p>
                   ) : (
-                    <div className="space-y-2 pl-0 sm:pl-2">
-                      {ALL_DAYS.filter((d) => days.has(d)).length === 0 ? (
-                        <p className="text-sm text-gray-600">Select at least one day to set times.</p>
-                      ) : (
-                        ALL_DAYS.filter((d) => days.has(d)).map((d) => (
-                          <div key={d} className="grid grid-cols-[80px_1fr_1fr] items-center gap-3">
-                            <div className="text-sm font-medium text-gray-900">{d}</div>
-                            <input
-                              type="time"
-                              value={perDay[d]?.start || ""}
-                              onChange={(e) => setPerDayStart(d, e.target.value)}
-                              className="rounded-lg border px-3 py-2 text-black"
-                              placeholder="Start"
-                            />
-                            <input
-                              type="time"
-                              value={perDay[d]?.end || ""}
-                              onChange={(e) => setPerDayEnd(d, e.target.value)}
-                              className="rounded-lg border px-3 py-2 text-black"
-                              placeholder="End"
-                            />
-                          </div>
-                        ))
-                      )}
-                      <p className="text-xs text-gray-500">Times are local to America/Indiana/Indianapolis.</p>
-                    </div>
+                    ALL_DAYS.filter((d) => days.has(d)).map((d) => (
+                      <div key={d} className="grid grid-cols-[80px_1fr_1fr] items-center gap-3">
+                        <div className="text-sm font-medium text-gray-900">{d}</div>
+                        <input
+                          type="time"
+                          value={perDay[d]?.start || ""}
+                          onChange={(e) => setPerDayStart(d, e.target.value)}
+                          className="rounded-lg border px-3 py-2 text-black bg-white"
+                          placeholder="Start"
+                        />
+                        <input
+                          type="time"
+                          value={perDay[d]?.end || ""}
+                          onChange={(e) => setPerDayEnd(d, e.target.value)}
+                          className="rounded-lg border px-3 py-2 text-black bg-white"
+                          placeholder="End"
+                        />
+                      </div>
+                    ))
                   )}
-
-                  {/* Tiny validation hint */}
-                  {daysSelected && !timesValid && (
-                    <p className="text-xs text-red-600">Please enter start & end times for the selected day(s).</p>
-                  )}
+                  <p className="text-xs text-gray-500">Times are local to America/Indiana/Indianapolis.</p>
                 </div>
+              )}
 
-                {error && <div className="text-sm text-red-600">{error}</div>}
+              {daysSelected && !timesValid && (
+                <p className="text-xs text-red-600">Please enter start & end times for the selected day(s).</p>
+              )}
+            </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={save}
-                    disabled={saveDisabled || (daysSelected && !timesValid)}
-                    className="px-4 py-2 rounded-lg bg-black text-white disabled:opacity-50"
-                  >
-                    {saving ? "Saving…" : "Save"}
-                  </button>
+            {error && <div className="text-sm text-red-600">{error}</div>}
 
-                  <button
-                    onClick={deleteClass}
-                    disabled={saving}
-                    className="px-4 py-2 rounded-lg border border-red-600 text-red-700 hover:bg-red-50"
-                  >
-                    Delete class
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+            <div className="flex flex-wrap items-center gap-2 pb-6">
+              <button
+                onClick={save}
+                disabled={saveDisabled || (daysSelected && !timesValid)}
+                className="px-4 py-2 rounded-lg bg-black text-white disabled:opacity-50"
+              >
+                {saving ? "Saving…" : "Save"}
+              </button>
+
+              <button
+                onClick={deleteClass}
+                disabled={saving}
+                className="px-4 py-2 rounded-lg border border-red-600 text-red-700 hover:bg-red-50"
+              >
+                Delete class
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </section>
   );

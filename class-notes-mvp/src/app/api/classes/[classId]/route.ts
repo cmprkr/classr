@@ -78,6 +78,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ classId: strin
       syncEnabled: true,
       syncKey: true,
       scheduleJson: true, // ✅ include schedule
+      isActive: true,     // ✅ include active flag
     },
   });
   if (!clazz) return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -90,11 +91,12 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ classId: stri
   const user = await requireUser();
   const body = await req.json();
 
-  const { name, syncEnabled, syncKey, scheduleJson } = body as {
+  const { name, syncEnabled, syncKey, scheduleJson, isActive } = body as {
     name?: string;
     syncEnabled?: boolean;
     syncKey?: string | null;
     scheduleJson?: ClientSchedule | null; // may be null to clear
+    isActive?: boolean;                   // ✅ new
   };
 
   const clazz = await db.class.findFirst({
@@ -116,6 +118,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ classId: stri
       ...(typeof name === "string" ? { name } : {}),
       ...(typeof syncEnabled === "boolean" ? { syncEnabled } : {}),
       ...(syncKey !== undefined ? { syncKey } : {}),
+      ...(typeof isActive === "boolean" ? { isActive } : {}), // ✅ persist active flag
       ...scheduleUpdate, // ✅ persist schedule
     },
     select: {
@@ -124,6 +127,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ classId: stri
       syncEnabled: true,
       syncKey: true,
       scheduleJson: true, // ✅ return schedule to client
+      isActive: true,     // ✅ return active flag
     },
   });
 

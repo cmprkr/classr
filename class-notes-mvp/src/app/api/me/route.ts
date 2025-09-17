@@ -1,4 +1,4 @@
-// app/api/me/route.ts
+// src/app/api/me/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
@@ -15,6 +15,26 @@ async function unlinkSafe(path: string | null | undefined) {
   }
 }
 
+// NEW: fetch minimal profile + defaultUniversityDomain
+export async function GET() {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const u = await db.user.findUnique({
+    where: { id: session.user.id as string },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      username: true,
+      image: true,
+      defaultUniversityDomain: true,
+    },
+  });
+  return NextResponse.json(u);
+}
+
 export async function PATCH(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
@@ -22,20 +42,31 @@ export async function PATCH(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({} as any));
-  const name = (body?.name ?? "").toString().trim();
+  const rawName = typeof body?.name === "string" ? body.name : undefined;
+  const rawDomain =
+    "defaultUniversityDomain" in body ? (body.defaultUniversityDomain ?? null) : undefined;
 
-  if (!name) {
-    return NextResponse.json({ error: "Name required" }, { status: 400 });
+  const data: Record<string, any> = {};
+  if (rawName !== undefined) data.name = rawName.toString().trim() || null;
+  if (rawDomain !== undefined) {
+    const v =
+      rawDomain === null || rawDomain === ""
+        ? null
+        : String(rawDomain).trim().toLowerCase();
+    data.defaultUniversityDomain = v;
+  }
+
+  if (!Object.keys(data).length) {
+    return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
   }
 
   await db.user.update({
     where: { id: session.user.id as string },
-    data: { name },
+    data,
   });
 
   revalidatePath("/account");
   revalidatePath("/");
-
   return NextResponse.json({ ok: true });
 }
 
@@ -64,7 +95,6 @@ export async function DELETE() {
       await tx.lecture.deleteMany({ where: { classId: { in: classIds } } });
       await tx.class.deleteMany({ where: { id: { in: classIds } } });
     }
-    // if using NextAuth Prisma adapter
     await tx.session.deleteMany({ where: { userId } });
     await tx.account.deleteMany({ where: { userId } });
     await tx.user.delete({ where: { id: userId } });
