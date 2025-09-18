@@ -1,16 +1,12 @@
-/* --- Global CSS --- */
-@import "tailwindcss";
+/* --- Global CSS (Tailwind v3) --- */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
+/* Your CSS variables/theme */
 :root {
   --background: #ffffff;
   --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -20,15 +16,14 @@
   }
 }
 
+/* Base element styles */
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
 
-/* --- App-wide safety guards --- */
-
-/* Prevent “jump to top” from stray <a href="#"> or empty hrefs anywhere */
+/* Safety guards */
 a[href="#"],
 a[href=""] {
   pointer-events: none;
