@@ -11,10 +11,6 @@ module.exports = {
         background: "var(--background)",
         foreground: "var(--foreground)",
       },
-      fontFamily: {
-        sans: "var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system",
-        mono: "var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco",
-      },
     },
   },
   plugins: [],
