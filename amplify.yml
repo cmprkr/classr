@@ -5,15 +5,11 @@ applications:
       phases:
         preBuild:
           commands:
-            - corepack enable
-            - corepack prepare pnpm@9 --activate || true
-            - pnpm -v || npm i -g pnpm
-            - pnpm install --frozen-lockfile || npm ci
+            - npm ci
         build:
           commands:
             - npx prisma generate
-            - npx prisma migrate deploy
-            - pnpm build || npm run build
+            - npm run build
       artifacts:
         baseDirectory: .next
         files:
@@ -21,4 +17,3 @@ applications:
       cache:
         paths:
           - node_modules/**/*
-          - .pnpm-store/**/*
