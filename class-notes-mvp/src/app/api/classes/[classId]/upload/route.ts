@@ -12,9 +12,19 @@ import path from "path";
 import { Readable } from "node:stream";
 import { ResourceType } from "@prisma/client";
 
+// NEW: S3 client (no static creds; Amplify compute role provides them in prod)
+import { S3Client } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// --- S3 configuration (set these in Amplify env) ---
+const S3_BUCKET = process.env.S3_BUCKET!;
+const S3_REGION = process.env.S3_REGION!;
+const s3 = new S3Client({ region: S3_REGION });
+
+// ---------- Helpers (unchanged logic) ----------
 async function safeEmbed(texts: string[]) {
   const inputs = texts.map((t) => (t ?? "").trim()).filter(Boolean);
   if (inputs.length === 0) return null;
@@ -114,6 +124,7 @@ async function readDocx(filePath: string) {
   return value || "";
 }
 
+// ---------- Route handler ----------
 export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ classId: string }> }
@@ -129,7 +140,10 @@ export async function POST(
 
   const effectiveSyncKey = clazz.syncEnabled ? (clazz.syncKey ?? null) : null;
 
-  await fsp.mkdir(uploadsPath(), { recursive: true });
+  // Use /tmp in production (Amplify runtime). Keep local path in dev.
+  const isProd = process.env.NODE_ENV === "production";
+  const tmpRoot = isProd ? "/tmp/uploads" : uploadsPath();
+  await fsp.mkdir(tmpRoot, { recursive: true });
 
   const form = await req.formData();
   const files = form.getAll("file") as File[];
@@ -142,7 +156,7 @@ export async function POST(
 
   const results: any[] = [];
 
-  // Manual text-only
+  // --------- Manual text-only path (unchanged) ----------
   if (!files.length && manualText.trim()) {
     const lec = await db.lecture.create({
       data: {
@@ -201,23 +215,23 @@ export async function POST(
     results.push({ lectureId: lec.id, status: "READY" });
   }
 
-  // File uploads
+  // --------- File uploads ----------
   for (const f of files) {
-    // ---- Size guard (configure to taste) ----
-    const MAX_BYTES = 1024 * 1024 * 512; // 512MB hard cap
+    // Size guard
+    const MAX_BYTES = 1024 * 1024 * 512; // 512MB
     if (typeof f.size === "number" && f.size > MAX_BYTES) {
       results.push({ file: f.name, status: "FAILED", error: "file too large" });
       continue;
     }
 
     const filenameSafe = f.name?.replace(/[^\w.\-]+/g, "_") || `upload_${Date.now()}`;
-    const dest = uploadsPath(`${Date.now()}_${filenameSafe}`);
+    const tempPath = path.join(tmpRoot, `${Date.now()}_${filenameSafe}`);
 
-    // ---- Stream browser File to disk (no full buffering) ----
+    // Stream browser File to a temp file (no full buffering)
     try {
       await new Promise<void>((resolve, reject) => {
         const nodeReadable = Readable.fromWeb((f as any).stream());
-        const writeStream = fs.createWriteStream(dest, { flags: "w" });
+        const writeStream = fs.createWriteStream(tempPath, { flags: "w" });
         nodeReadable.on("error", reject);
         writeStream.on("error", reject);
         writeStream.on("finish", () => resolve());
@@ -236,12 +250,16 @@ export async function POST(
       ? (kindInput as ResourceType)
       : await guessKind(f.name || filenameSafe, mime, descriptor, "");
 
+    // Choose an S3 key (canonical location of original in prod)
+    const s3Key = `classes/${classId}/${Date.now()}_${filenameSafe}`;
+
+    // Create DB row; filePath uses S3 in prod, local path in dev
     const lec = await db.lecture.create({
       data: {
         classId,
         userId: user.id,
-        originalName: f.name || path.basename(dest),
-        filePath: dest,
+        originalName: f.name || path.basename(tempPath),
+        filePath: isProd ? s3Key : tempPath,
         mime,
         descriptor,
         kind,
@@ -251,19 +269,36 @@ export async function POST(
     });
 
     try {
+      // Upload the raw file to S3 (prod only)
+      if (isProd) {
+        const bodyStream = fs.createReadStream(tempPath);
+        await new Upload({
+          client: s3,
+          params: {
+            Bucket: S3_BUCKET,
+            Key: s3Key,
+            Body: bodyStream,
+            ContentType: mime || "application/octet-stream",
+          },
+          leavePartsOnError: false,
+        }).done();
+      }
+
+      // ---- Process from the temp file ----
       let transcriptText = "";
       let textContent = "";
       let durationSec: number | null = null;
 
-      // ---- Optional: cap transcription size to avoid long STT on giants ----
-      const TRANSCRIBE_MAX = 1024 * 1024 * 200; // 200MB cap for STT
-      const canTranscribe = /^audio\//.test(mime) && (typeof f.size !== "number" || f.size <= TRANSCRIBE_MAX);
+      // Optional: cap transcription size
+      const TRANSCRIBE_MAX = 1024 * 1024 * 200; // 200MB
+      const canTranscribe =
+        /^audio\//.test(mime) && (typeof f.size !== "number" || f.size <= TRANSCRIBE_MAX);
 
       if (canTranscribe && /^audio\//.test(mime)) {
-        const fileStream = fs.createReadStream(dest, { highWaterMark: 1024 * 1024 * 4 }); // 4MB chunks
+        const fileStream = fs.createReadStream(tempPath, { highWaterMark: 1024 * 1024 * 4 });
         const tr: any = await openai.audio.transcriptions.create({
           model: MODELS.stt,
-          file: fileStream,
+          file: fileStream as any,
           response_format: "verbose_json",
         });
         const segments = (tr.segments || []).map((s: any) => ({
@@ -318,28 +353,28 @@ export async function POST(
           console.error("embed failed (audio):", e?.message || e);
         }
       } else if (mime === "application/pdf" || filenameSafe.toLowerCase().endsWith(".pdf")) {
-        textContent = await readPdf(dest);
+        textContent = await readPdf(tempPath);
       } else if (mime === "text/plain" || /\.(txt|md)$/i.test(filenameSafe)) {
-        textContent = await readTxt(dest);
+        textContent = await readTxt(tempPath);
       } else if (
         mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
         /\.docx$/i.test(filenameSafe)
       ) {
-        textContent = await readDocx(dest);
+        textContent = await readDocx(tempPath);
       } else if (/^image\//.test(mime) || /\.(png|jpg|jpeg|gif|webp)$/i.test(filenameSafe)) {
-        textContent = await ocrImageWithVision(dest);
+        textContent = await ocrImageWithVision(tempPath);
       } else if (!mime && /\.(pdf|txt|md|docx|png|jpg|jpeg|gif|webp)$/i.test(filenameSafe)) {
-        if (/\.pdf$/i.test(filenameSafe)) textContent = await readPdf(dest);
-        else if (/\.(txt|md)$/i.test(filenameSafe)) textContent = await readTxt(dest);
-        else if (/\.docx$/i.test(filenameSafe)) textContent = await readDocx(dest);
-        else if (/\.(png|jpg|jpeg|gif|webp)$/i.test(filenameSafe)) textContent = await ocrImageWithVision(dest);
+        if (/\.pdf$/i.test(filenameSafe)) textContent = await readPdf(tempPath);
+        else if (/\.(txt|md)$/i.test(filenameSafe)) textContent = await readTxt(tempPath);
+        else if (/\.docx$/i.test(filenameSafe)) textContent = await readDocx(tempPath);
+        else if (/\.(png|jpg|jpeg|gif|webp)$/i.test(filenameSafe)) textContent = await ocrImageWithVision(tempPath);
       } else {
         textContent = "";
       }
 
-      const manualText = (form.get("manualText") as string) || "";
-      const manual = manualText?.trim() ? `\n\n[User Notes]\n${manualText.trim()}` : "";
-      const basis = (transcriptText || textContent || manualText || "").slice(0, 12000);
+      const manualText2 = (form.get("manualText") as string) || "";
+      const manual = manualText2?.trim() ? `\n\n[User Notes]\n${manualText2.trim()}` : "";
+      const basis = (transcriptText || textContent || manualText2 || "").slice(0, 12000);
 
       // Summary (best-effort)
       let summaryContent = "";
@@ -385,8 +420,8 @@ export async function POST(
         },
       });
 
-      if (!transcriptText && (textContent || manualText)) {
-        const text = (textContent || "") + (manualText ? `\n\n[User Notes]\n${manualText}` : "");
+      if (!transcriptText && (textContent || manualText2)) {
+        const text = (textContent || "") + (manualText2 ? `\n\n[User Notes]\n${manualText2}` : "");
         const segments = [{ start: 0, end: Math.min(300, Math.ceil(text.length / 6)), text }];
         const chunks = chunkTranscript(segments);
 
@@ -425,7 +460,12 @@ export async function POST(
         }
       }
 
-      results.push({ lectureId: lec.id, status: "READY" });
+      // Clean up temp file in prod
+      if (isProd) {
+        try { await fsp.unlink(tempPath); } catch {}
+      }
+
+      results.push({ lectureId: lec.id, status: "READY", key: isProd ? s3Key : tempPath });
     } catch (e: any) {
       console.error("Upload processing failed:", e?.message || e);
       await db.lecture.update({ where: { id: lec.id }, data: { status: "FAILED" } });
