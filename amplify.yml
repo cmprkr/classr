@@ -1,21 +1,20 @@
 version: 1
-appRoot: class-notes-mvp
-frontend:
-  phases:
-    preBuild:
-      commands:
-        - export NPM_CONFIG_PRODUCTION=false
-        - npm ci
-        - npx prisma generate
-    build:
-      commands:
-        - npm run build
-  artifacts:
-    baseDirectory: .next
-    files:
-      - '**/*'
-  cache:
-    paths:
-      - node_modules/**/*
-  environment:
-    AWS_LAMBDA_LOG_GROUP_NAME: /aws/lambda/university_mp3_transcriber-main-ssr
+applications:
+  - appRoot: class-notes-mvp
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - export NPM_CONFIG_PRODUCTION=false   # <-- allow devDependencies
+            - npm ci
+        build:
+          commands:
+            - npx prisma generate
+            - npm run build
+      artifacts:
+        baseDirectory: .next
+        files:
+          - "**/*"
+      cache:
+        paths:
+          - node_modules/**/*
