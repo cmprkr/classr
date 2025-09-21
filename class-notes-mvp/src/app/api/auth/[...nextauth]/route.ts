@@ -40,21 +40,25 @@ export const authOptions: NextAuthOptions = {
   ],
   callbacks: {
     async jwt({ token, user }) {
-      // On initial sign-in, `user` is defined (from authorize)
       if (user) {
-        token.userId = (user as any).id ?? token.userId ?? null;
+        // ensure we persist id + extras into the token on first sign-in
+        (token as any).userId  = (user as any).id ?? (token as any).userId ?? token.sub ?? null;
         (token as any).username = (user as any).username ?? (token as any).username ?? null;
-        (token as any).picture = (user as any).image ?? (token as any).picture ?? null;
-        token.name = user.name ?? token.name ?? null;
+        (token as any).picture  = (user as any).image ?? (token as any).picture ?? null;
+        token.name  = user.name  ?? token.name  ?? null;
         token.email = user.email ?? token.email ?? null;
       }
       return token;
     },
-    async session({ session, token }) {
+
+    async session({ session, token, user }) {
+      // cover both JWT and database session strategies
+      const id = (token as any).userId ?? token.sub ?? (user as any)?.id ?? null;
+
       if (session.user) {
-        (session.user as any).id = (token as any).userId ?? (session.user as any).id ?? null;
-        (session.user as any).username = (token as any).username ?? null;
-        session.user.name = token.name ?? session.user.name ?? null;
+        (session.user as any).id = id;
+        (session.user as any).username = (token as any).username ?? (session.user as any).username ?? null;
+        session.user.name  = token.name  ?? session.user.name  ?? null;
         session.user.email = token.email ?? session.user.email ?? null;
         session.user.image = (token as any).picture ?? session.user.image ?? null;
       }
