@@ -12,6 +12,13 @@ import path from "path";
 import { Readable } from "node:stream";
 import { ResourceType } from "@prisma/client";
 
+import ffmpeg from "fluent-ffmpeg";
+import ffmpegStatic from "ffmpeg-static";
+import ffprobeStatic from "ffprobe-static";
+
+if (ffmpegStatic) ffmpeg.setFfmpegPath(ffmpegStatic as unknown as string);
+if (ffprobeStatic?.path) ffmpeg.setFfprobePath(ffprobeStatic.path);
+
 // NEW: S3 client (no static creds; Amplify compute role provides them in prod)
 import { S3Client } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
@@ -122,6 +129,115 @@ async function readDocx(filePath: string) {
   const { default: mammoth } = await import("mammoth");
   const { value } = await mammoth.extractRawText({ path: filePath });
   return value || "";
+}
+
+const OPENAI_LIMIT = 24 * 1024 * 1024; // 24MB safety (API is ~25MB)
+
+function getDurationSec(p: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(p, (err, data) => {
+      if (err) return reject(err);
+      resolve(Math.ceil((data.format?.duration as number) || 0));
+    });
+  });
+}
+
+async function transcodeToCompact(inputPath: string, outPath: string) {
+  // 16 kHz mono, 48 kbps MP3 → very compact, speech-optimized
+  await new Promise<void>((resolve, reject) => {
+    ffmpeg(inputPath)
+      .audioCodec("libmp3lame")
+      .audioChannels(1)
+      .audioBitrate("48k")
+      .outputOptions(["-ar 16000"])
+      .on("error", reject)
+      .on("end", () => resolve())
+      .save(outPath);
+  });
+}
+
+async function segmentAudio(inputPath: string, patternPath: string, secondsPerPart = 900) {
+  // Split into ~15min parts; with 48 kbps each part is far below 25MB
+  await new Promise<void>((resolve, reject) => {
+    ffmpeg(inputPath)
+      .audioCodec("libmp3lame")
+      .audioChannels(1)
+      .audioBitrate("48k")
+      .outputOptions(["-ar 16000", "-f segment", `-segment_time ${secondsPerPart}`, "-reset_timestamps 1"])
+      .on("error", reject)
+      .on("end", () => resolve())
+      .save(patternPath); // e.g., /tmp/foo_part_%03d.mp3
+  });
+}
+
+async function transcribeWithOpenAI(filePath: string) {
+  const fileStream = fs.createReadStream(filePath, { highWaterMark: 1024 * 1024 * 4 });
+  const tr: any = await openai.audio.transcriptions.create({
+    model: MODELS.stt,
+    file: fileStream as any,
+    response_format: "verbose_json",
+  });
+  const segments = (tr.segments || []).map((s: any) => ({
+    start: Math.floor(s.start),
+    end: Math.ceil(s.end),
+    text: s.text,
+  }));
+  const text = tr.text || segments.map((s: any) => s.text).join(" ");
+  const duration = Math.ceil(tr.duration ?? (segments.at(-1)?.end ?? 0));
+  return { text, segments, duration };
+}
+
+async function transcribeLargeAudio(filePath: string) {
+  // 1) If already under limit, go straight to OpenAI
+  const st = await fsp.stat(filePath);
+  if (st.size <= OPENAI_LIMIT) {
+    return await transcribeWithOpenAI(filePath);
+  }
+
+  // 2) Try compact transcode
+  const dir = path.dirname(filePath);
+  const base = path.basename(filePath, path.extname(filePath));
+  const compactPath = path.join(dir, `${base}_compact.mp3`);
+  await transcodeToCompact(filePath, compactPath);
+
+  const st2 = await fsp.stat(compactPath);
+  if (st2.size <= OPENAI_LIMIT) {
+    try {
+      const r = await transcribeWithOpenAI(compactPath);
+      try { await fsp.unlink(compactPath); } catch {}
+      return r;
+    } catch (e) {
+      try { await fsp.unlink(compactPath); } catch {}
+      throw e;
+    }
+  }
+
+  // 3) Split into parts and transcribe sequentially
+  const pattern = path.join(dir, `${base}_part_%03d.mp3`);
+  await segmentAudio(compactPath, pattern, 900); // ~15 min
+  // enumerate parts
+  const files = (await fsp.readdir(dir))
+    .filter((f) => f.startsWith(`${base}_part_`) && f.endsWith(".mp3"))
+    .map((f) => path.join(dir, f))
+    .sort();
+
+  let totalText = "";
+  let totalDuration = 0;
+  let allSegments: { start: number; end: number; text: string }[] = [];
+
+  for (const part of files) {
+    const r = await transcribeWithOpenAI(part);
+    // offset segments by elapsed duration
+    const offset = totalDuration;
+    const shifted = r.segments.map((s: { start: number; end: number; text: string }) => ({ start: s.start + offset, end: s.end + offset, text: s.text }));
+    totalText += (totalText ? " " : "") + r.text;
+    totalDuration += r.duration || (await getDurationSec(part));
+    allSegments.push(...shifted);
+    try { await fsp.unlink(part); } catch {}
+  }
+
+  try { await fsp.unlink(compactPath); } catch {}
+  return { text: totalText, segments: allSegments, duration: totalDuration };
 }
 
 // ---------- Route handler ----------
@@ -295,30 +411,20 @@ export async function POST(
         /^audio\//.test(mime) && (typeof f.size !== "number" || f.size <= TRANSCRIBE_MAX);
 
       if (canTranscribe && /^audio\//.test(mime)) {
-        const fileStream = fs.createReadStream(tempPath, { highWaterMark: 1024 * 1024 * 4 });
-        const tr: any = await openai.audio.transcriptions.create({
-          model: MODELS.stt,
-          file: fileStream as any,
-          response_format: "verbose_json",
-        });
-        const segments = (tr.segments || []).map((s: any) => ({
-          start: Math.floor(s.start),
-          end: Math.ceil(s.end),
-          text: s.text,
-        }));
-        transcriptText = tr.text || segments.map((s: any) => s.text).join(" ");
-        durationSec = Math.ceil(tr.duration ?? (segments.at(-1)?.end ?? 0));
+        const { text: tText, segments: segs, duration: dur } = await transcribeLargeAudio(tempPath);
+        transcriptText = tText;
+        durationSec = dur;
 
         await db.lecture.update({
           where: { id: lec.id },
           data: {
             durationSec,
             transcript: transcriptText,
-            segmentsJson: JSON.stringify(segments),
+            segmentsJson: JSON.stringify(segs),
           },
         });
 
-        const chunks = chunkTranscript(segments);
+        const chunks = chunkTranscript(segs);
         for (const c of chunks) {
           await db.chunk.create({
             data: {
