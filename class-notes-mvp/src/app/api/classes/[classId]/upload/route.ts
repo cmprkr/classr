@@ -17,18 +17,6 @@ import { TranscribeClient, StartTranscriptionJobCommand, GetTranscriptionJobComm
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-// src/app/api/classes/[classId]/upload/route.ts
-import ffmpeg from "fluent-ffmpeg";
-
-// Use CJS require so we get real filesystem paths at runtime
-const ffmpegPath: string = require("ffmpeg-static");
-const ffprobePath: string = require("ffprobe-static").path;
-
-ffmpeg.setFfmpegPath(ffmpegPath || "/usr/bin/ffmpeg");
-ffmpeg.setFfprobePath(ffprobePath || "/usr/bin/ffprobe");
-
-
-
 // NEW: S3 client (no static creds; Amplify compute role provides them in prod)
 import { S3Client } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
@@ -144,43 +132,6 @@ async function readDocx(filePath: string) {
 const transcribe = new TranscribeClient({ region: S3_REGION });
 const OPENAI_LIMIT = 24 * 1024 * 1024; // keep a safety margin under ~25MB
 
-function getDurationSec(p: string): Promise<number> {
-  return new Promise((resolve, reject) => {
-    ffmpeg.ffprobe(p, (err, data) => {
-      if (err) return reject(err);
-      resolve(Math.ceil((data.format?.duration as number) || 0));
-    });
-  });
-}
-
-async function transcodeToCompact(inputPath: string, outPath: string) {
-  // 16 kHz mono, 48 kbps MP3 → very compact, speech-optimized
-  await new Promise<void>((resolve, reject) => {
-    ffmpeg(inputPath)
-      .audioCodec("libmp3lame")
-      .audioChannels(1)
-      .audioBitrate("48k")
-      .outputOptions(["-ar 16000"])
-      .on("error", reject)
-      .on("end", () => resolve())
-      .save(outPath);
-  });
-}
-
-async function segmentAudio(inputPath: string, patternPath: string, secondsPerPart = 900) {
-  // Split into ~15min parts; with 48 kbps each part is far below 25MB
-  await new Promise<void>((resolve, reject) => {
-    ffmpeg(inputPath)
-      .audioCodec("libmp3lame")
-      .audioChannels(1)
-      .audioBitrate("48k")
-      .outputOptions(["-ar 16000", "-f segment", `-segment_time ${secondsPerPart}`, "-reset_timestamps 1"])
-      .on("error", reject)
-      .on("end", () => resolve())
-      .save(patternPath); // e.g., /tmp/foo_part_%03d.mp3
-  });
-}
-
 async function transcribeWithOpenAI(filePath: string) {
   const fileStream = fs.createReadStream(filePath, { highWaterMark: 1024 * 1024 * 4 });
   const tr: any = await openai.audio.transcriptions.create({
@@ -196,59 +147,6 @@ async function transcribeWithOpenAI(filePath: string) {
   const text = tr.text || segments.map((s: any) => s.text).join(" ");
   const duration = Math.ceil(tr.duration ?? (segments.at(-1)?.end ?? 0));
   return { text, segments, duration };
-}
-
-async function transcribeLargeAudio(filePath: string) {
-  // 1) If already under limit, go straight to OpenAI
-  const st = await fsp.stat(filePath);
-  if (st.size <= OPENAI_LIMIT) {
-    return await transcribeWithOpenAI(filePath);
-  }
-
-  // 2) Try compact transcode
-  const dir = path.dirname(filePath);
-  const base = path.basename(filePath, path.extname(filePath));
-  const compactPath = path.join(dir, `${base}_compact.mp3`);
-  await transcodeToCompact(filePath, compactPath);
-
-  const st2 = await fsp.stat(compactPath);
-  if (st2.size <= OPENAI_LIMIT) {
-    try {
-      const r = await transcribeWithOpenAI(compactPath);
-      try { await fsp.unlink(compactPath); } catch {}
-      return r;
-    } catch (e) {
-      try { await fsp.unlink(compactPath); } catch {}
-      throw e;
-    }
-  }
-
-  // 3) Split into parts and transcribe sequentially
-  const pattern = path.join(dir, `${base}_part_%03d.mp3`);
-  await segmentAudio(compactPath, pattern, 900); // ~15 min
-  // enumerate parts
-  const files = (await fsp.readdir(dir))
-    .filter((f) => f.startsWith(`${base}_part_`) && f.endsWith(".mp3"))
-    .map((f) => path.join(dir, f))
-    .sort();
-
-  let totalText = "";
-  let totalDuration = 0;
-  let allSegments: { start: number; end: number; text: string }[] = [];
-
-  for (const part of files) {
-    const r = await transcribeWithOpenAI(part);
-    // offset segments by elapsed duration
-    const offset = totalDuration;
-    const shifted = r.segments.map((s: { start: number; end: number; text: string }) => ({ start: s.start + offset, end: s.end + offset, text: s.text }));
-    totalText += (totalText ? " " : "") + r.text;
-    totalDuration += r.duration || (await getDurationSec(part));
-    allSegments.push(...shifted);
-    try { await fsp.unlink(part); } catch {}
-  }
-
-  try { await fsp.unlink(compactPath); } catch {}
-  return { text: totalText, segments: allSegments, duration: totalDuration };
 }
 
 async function startTranscribeForS3Key(bucket: string, key: string, lang: "en-US" | "auto" = "en-US") {
