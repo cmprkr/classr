@@ -3,11 +3,22 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import bcrypt from "bcryptjs";
 
+import { headers } from "next/headers";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function okRedirect(req: Request, to = "/auth/signin?new=1") {
-  return NextResponse.redirect(new URL(to, req.url), { status: 303 });
+async function publicOrigin() {
+  // prefer env (works behind any proxy)
+  if (process.env.NEXTAUTH_URL) return process.env.NEXTAUTH_URL.replace(/\/+$/,'');
+  const h = await headers();
+  const proto = h.get("x-forwarded-proto") ?? "https";
+  const host  = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
+  return `${proto}://${host}`;
+}
+
+async function okRedirect(req: Request, to = "/auth/signin?new=1") {
+  return NextResponse.redirect(new URL(to, await publicOrigin()), { status: 303 });
 }
 
 function bad(status: number, msg: string) {
@@ -87,7 +98,7 @@ export async function POST(req: Request) {
       },
     });
 
-    return okRedirect(req);
+    return await okRedirect(req);
   } catch (e: any) {
     console.error("signup error:", e?.message || e);
     return bad(500, "Internal error");
