@@ -14,8 +14,6 @@ import { ResourceType } from "@prisma/client";
 
 //aws
 import { TranscribeClient, StartTranscriptionJobCommand, GetTranscriptionJobCommand } from "@aws-sdk/client-transcribe";
-import { GetObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 // NEW: S3 client (no static creds; Amplify compute role provides them in prod)
 import { S3Client } from "@aws-sdk/client-s3";
@@ -150,23 +148,14 @@ async function transcribeWithOpenAI(filePath: string) {
 }
 
 async function startTranscribeForS3Key(bucket: string, key: string, lang: "en-US" | "auto" = "en-US") {
-  // Pre-sign a GET URL so Transcribe can fetch the media without changing bucket policy.
-  const mediaUrl = await getSignedUrl(
-    s3,
-    new GetObjectCommand({ Bucket: bucket, Key: key }),
-    { expiresIn: 60 * 60 } // 1 hour is plenty for job start
-  );
-
   const jobName = `classr-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
-
-  const cmd = new StartTranscriptionJobCommand({
+  await transcribe.send(new StartTranscriptionJobCommand({
     TranscriptionJobName: jobName,
-    Media: { MediaFileUri: mediaUrl },     // pre-signed HTTPS URL
+    Media: { MediaFileUri: `s3://${bucket}/${key}` }, // <-- s3 URI
     MediaFormat: "mp3",
     LanguageCode: lang === "en-US" ? "en-US" : undefined,
-    IdentifyLanguage: lang === "auto" ? true : undefined
-  });
-  await transcribe.send(cmd);
+    IdentifyLanguage: lang === "auto" ? true : undefined,
+  }));
   return jobName;
 }
 
