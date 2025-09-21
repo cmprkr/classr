@@ -13,11 +13,15 @@ import { Readable } from "node:stream";
 import { ResourceType } from "@prisma/client";
 
 import ffmpeg from "fluent-ffmpeg";
-import ffmpegStatic from "ffmpeg-static";
-import ffprobeStatic from "ffprobe-static";
 
-if (ffmpegStatic) ffmpeg.setFfmpegPath(ffmpegStatic as unknown as string);
-if (ffprobeStatic?.path) ffmpeg.setFfprobePath(ffprobeStatic.path);
+// Use CJS require so we get absolute binary paths at runtime.
+const ffmpegPath: string = require("ffmpeg-static");
+const { path: ffprobePath }: { path: string } = require("@ffprobe-installer/ffprobe");
+
+// Point fluent-ffmpeg at the real binaries (fallbacks allow system ffmpeg/ffprobe if installed)
+ffmpeg.setFfmpegPath(ffmpegPath || "/usr/bin/ffmpeg");
+ffmpeg.setFfprobePath(ffprobePath || "/usr/bin/ffprobe");
+
 
 // NEW: S3 client (no static creds; Amplify compute role provides them in prod)
 import { S3Client } from "@aws-sdk/client-s3";
