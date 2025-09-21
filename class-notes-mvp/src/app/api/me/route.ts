@@ -1,10 +1,22 @@
 // src/app/api/me/route.ts
+import { S3Client, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import fsp from "fs/promises";
+
+const s3 = new S3Client({ region: process.env.S3_REGION! });
+async function s3DeleteSafe(key?: string | null) {
+  if (!key) return;
+  try {
+    await s3.send(new DeleteObjectCommand({
+      Bucket: process.env.S3_BUCKET!,
+      Key: key
+    }));
+  } catch {}
+}
 
 async function unlinkSafe(path: string | null | undefined) {
   if (!path) return;
@@ -87,7 +99,11 @@ export async function DELETE() {
   const classIds = classes.map((c) => c.id);
   const filePaths = classes.flatMap((c) => c.lectures.map((l) => l.filePath).filter(Boolean));
 
-  await Promise.allSettled(filePaths.map((p) => unlinkSafe(p)));
+  if (process.env.NODE_ENV === "production") {
+    await Promise.allSettled(filePaths.map((k) => s3DeleteSafe(k)));
+  } else {
+    await Promise.allSettled(filePaths.map((p) => unlinkSafe(p)));
+  }
 
   await db.$transaction(async (tx) => {
     if (classIds.length) {
