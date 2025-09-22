@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { db } from "@/lib/db";
+import { revalidatePath } from "next/cache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,10 +32,12 @@ export async function POST(req: Request) {
           user = await db.user.findFirst({ where: { email: s.customer_details.email } });
         }
         if (user) {
-          await db.user.update({
-            where: { id: user.id },
-            data: { planTier: "PREMIUM", planStatus: "active", stripeCustomerId: customerId, stripeSubscriptionId: subId },
-          });
+            await db.user.update({
+            where: { stripeCustomerId: customerId },
+            data: { planTier: "PREMIUM", planStatus: subscription.status, stripeSubscriptionId: subscription.id },
+            });
+
+            revalidatePath("/account"); // ensure the Account page shows Premium right away
         }
         break;
       }

@@ -2,14 +2,16 @@
 
 import ProfileSettingsCard from "@/components/ProfileSettingsCard";
 import EventShield from "@/components/EventShield";
-import BillingButtons from "@/components/BillingButtons"; // <-- add this
+import BillingButtons from "@/components/BillingButtons";
 
 export default function AccountClient({
   user,
   isSignedIn,
+  isPremium,
 }: {
   user: { id: string | null; name: string; email: string; image: string | null; username?: string | null };
   isSignedIn: boolean;
+  isPremium: boolean;
 }) {
   const userWithUsername = { ...user, username: user.username ?? null };
 
@@ -18,8 +20,7 @@ export default function AccountClient({
       <EventShield>
         <div>
           <ProfileSettingsCard user={userWithUsername} isSignedIn={isSignedIn} />
-          {/* Show billing actions only when signed in */}
-          {isSignedIn && <BillingButtons />}
+          {isSignedIn && <BillingButtons isPremium={isPremium} />}
         </div>
       </EventShield>
     </div>
