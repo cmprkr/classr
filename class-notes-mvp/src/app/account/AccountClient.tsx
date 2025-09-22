@@ -3,6 +3,7 @@
 import ProfileSettingsCard from "@/components/ProfileSettingsCard";
 import EventShield from "@/components/EventShield";
 import BillingButtons from "@/components/BillingButtons";
+import UsageCard from "@/components/UsageCard";
 
 export default function AccountClient({
   user,
@@ -18,9 +19,10 @@ export default function AccountClient({
   return (
     <div className="relative h-full w-full overflow-y-auto p-6 sm:p-10 flex items-start justify-center">
       <EventShield>
-        <div>
+        <div className="max-w-xl">
           <ProfileSettingsCard user={userWithUsername} isSignedIn={isSignedIn} />
           {isSignedIn && <BillingButtons isPremium={isPremium} />}
+          {isSignedIn && <UsageCard />}
         </div>
       </EventShield>
     </div>
