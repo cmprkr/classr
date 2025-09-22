@@ -9,10 +9,12 @@ export default function AccountClient({
   user,
   isSignedIn,
   isPremium,
+  initialUsage,
 }: {
   user: { id: string | null; name: string; email: string; image: string | null; username?: string | null };
   isSignedIn: boolean;
   isPremium: boolean;
+  initialUsage?: any | null;   // server-provided snapshot
 }) {
   const userWithUsername = { ...user, username: user.username ?? null };
 
@@ -22,7 +24,7 @@ export default function AccountClient({
         <div className="max-w-xl">
           <ProfileSettingsCard user={userWithUsername} isSignedIn={isSignedIn} />
           {isSignedIn && <BillingButtons isPremium={isPremium} />}
-          {isSignedIn && <UsageCard />}
+          {isSignedIn && <UsageCard initial={initialUsage ?? null} />}
         </div>
       </EventShield>
     </div>

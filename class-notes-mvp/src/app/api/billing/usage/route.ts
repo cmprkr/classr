@@ -1,32 +1,28 @@
-/** Sum all minutes ever recorded for the user */
-export async function getAllTimeMinutes(userId: string) {
-  const agg = await db.usageCounter.aggregate({
-    where: { userId },
-    _sum: { minutes: true },
-  });
-  return agg._sum.minutes ?? 0;
-}
+import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import { db } from "@/lib/db";
+import { getUsageSnapshot } from "@/lib/billing";
 
-/** Allowance: null = unlimited */
-export function weeklyAllowanceFor(plan: PlanTier | null | undefined): number | null {
-  return plan === "PREMIUM" ? null : FREE_WEEKLY_MIN;
-}
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-/** Full usage snapshot for UI */
-export async function getUsageSnapshot(userId: string, plan: PlanTier) {
-  const { weekStart, minutes: usedThisWeek } = await getUsedMinutesThisWeek(userId);
-  const allTime = await getAllTimeMinutes(userId);
-  const allowance = weeklyAllowanceFor(plan);               // null = unlimited
-  const remaining = allowance == null ? null : Math.max(0, allowance - usedThisWeek);
-  const resetsAt = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+export async function GET() {
+  try {
+    const session = await getServerSession(authOptions);
+    const uid = (session?.user as any)?.id as string | undefined;
+    if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  return {
-    usedThisWeek,
-    allTime,
-    allowance,     // number | null
-    remaining,     // number | null
-    weekStart,
-    resetsAt,
-    plan,
-  };
+    const user = await db.user.findUnique({
+      where: { id: uid },
+      select: { planTier: true },
+    });
+    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+    const snap = await getUsageSnapshot(uid, user.planTier);
+    return NextResponse.json(snap);
+  } catch (e: any) {
+    console.error("usage API failed:", e?.message || e);
+    return NextResponse.json({ error: "usage_failed", detail: e?.message || String(e) }, { status: 500 });
+  }
 }

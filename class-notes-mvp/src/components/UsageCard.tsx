@@ -16,36 +16,45 @@ function fmt(n: number) {
   return new Intl.NumberFormat().format(Math.max(0, Math.floor(n)));
 }
 
-export default function UsageCard() {
-  const [data, setData] = useState<UsageSnap | null>(null);
+export default function UsageCard({ initial }: { initial?: UsageSnap | null }) {
+  const [data, setData] = useState<UsageSnap | null>(initial ?? null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const r = await fetch("/api/billing/usage", { cache: "no-store" });
-        if (!r.ok) throw new Error(await r.text());
+        const r = await fetch("/api/billing/usage", {
+          cache: "no-store",
+          credentials: "include", // be explicit
+        });
+        if (!r.ok) {
+          // surface server message
+          const msg = await r.text().catch(() => "");
+          throw new Error(msg || `HTTP ${r.status}`);
+        }
         const json = await r.json();
         if (!alive) return;
-        // coerce dates to ISO strings for consistent rendering
         json.weekStart = new Date(json.weekStart).toISOString();
         json.resetsAt = new Date(json.resetsAt).toISOString();
         setData(json);
+        setErr(null);
       } catch (e: any) {
-        setErr(e?.message || "Failed to load usage");
+        // Only show an error if we *also* have no initial data
+        if (!data) setErr(e?.message || "Failed to load usage");
       }
     })();
     return () => { alive = false; };
-  }, []);
+  }, []); // eslint-disable-line
 
-  if (err) {
+  if (err && !data) {
     return (
       <div className="mt-4 rounded-xl border bg-white p-4">
         <div className="text-sm text-red-700">Usage error: {err}</div>
       </div>
     );
   }
+
   if (!data) {
     return (
       <div className="mt-4 rounded-xl border bg-white p-4">
@@ -55,13 +64,8 @@ export default function UsageCard() {
   }
 
   const resetsLocal = new Date(data.resetsAt).toLocaleString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
+    weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
-
   const pct =
     data.allowance == null
       ? 0
@@ -77,22 +81,14 @@ export default function UsageCard() {
       </div>
 
       {data.allowance == null ? (
-        <>
-          <div className="text-sm text-gray-700">Weekly usage: {fmt(data.usedThisWeek)} min</div>
-        </>
+        <div className="text-sm text-gray-700">Weekly usage: {fmt(data.usedThisWeek)} min</div>
       ) : (
         <>
           <div className="text-sm text-gray-700">
             Weekly usage: {fmt(data.usedThisWeek)} / {fmt(data.allowance)} min
           </div>
           <div className="h-2 w-full rounded bg-gray-200 overflow-hidden">
-            <div
-              className="h-2 bg-black"
-              style={{ width: `${pct}%` }}
-              aria-valuenow={pct}
-              aria-valuemin={0}
-              aria-valuemax={100}
-            />
+            <div className="h-2 bg-black" style={{ width: `${pct}%` }} />
           </div>
           <div className="text-xs text-gray-600">
             Remaining: {fmt(data.remaining ?? 0)} min · Resets {resetsLocal}
