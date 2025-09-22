@@ -34,7 +34,7 @@ const classesModuleCache = new Map<string, Promise<any>>();
 async function importClassesModule(country: string, primaryDomain: string) {
   const countrySlug = slugifyCountry(country);
   const domain = primaryDomain.toLowerCase();
-  const path = `data/universities/${countrySlug}/${domain}/classes`;
+  const path = `data/universities/${countrySlug}/${domain}/classes.ts`;
 
   if (!classesModuleCache.has(path)) {
     classesModuleCache.set(path, import(/* @ts-ignore - dynamic segment */ path));
@@ -50,7 +50,7 @@ async function loadClassListForInstitution(inst: Institution) {
   const list: UniClass[] | undefined = mod?.CLASS_LIST;
   if (!list) {
     throw new Error(
-      `Classes not found at data/universities/${slugifyCountry(inst.country)}/${domain}/classes.`
+      `Classes not found at data/universities/${slugifyCountry(inst.country)}/${domain}/classes.ts`
     );
   }
   return list.map((c) => ({ value: c.syncKey, label: `${c.code} — ${c.name}` }));
