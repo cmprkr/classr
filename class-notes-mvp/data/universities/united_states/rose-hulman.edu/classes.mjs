@@ -1,4 +1,4 @@
-export const CLASS_LIST = [
+export default [
   { code: 'ANTH S101', name: 'Introduction to Anthropology', syncKey: 'ANTH_S101' },
   { code: 'ANTH S140', name: 'Introduction to East Asia', syncKey: 'ANTH_S140' },
   { code: 'ANTH S150', name: 'Introduction to Islam', syncKey: 'ANTH_S150' },
