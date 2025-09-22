@@ -7,6 +7,11 @@ generator client {
   provider = "prisma-client-js"
 }
 
+enum PlanTier {
+  FREE
+  PREMIUM
+}
+
 model User {
   id            String            @id @default(cuid())
   name          String?
@@ -19,6 +24,15 @@ model User {
   // NEW: user's default university (primary domain from institutions list)
   defaultUniversityDomain String?
 
+  // Billing
+  planTier              PlanTier @default(FREE)
+  planStatus            String?  // "active" | "trialing" | "past_due" | "canceled" | etc
+  stripeCustomerId      String?
+  stripeSubscriptionId  String?
+
+  @@index([stripeCustomerId])
+  @@index([stripeSubscriptionId])
+
   classes       Class[]
   chats         ChatMessage[]
   lectures      Lecture[]
@@ -29,6 +43,18 @@ model User {
 
   // NEW: per-lecture user prefs
   lecturePrefs  LectureUserPref[]
+}
+
+model UsageCounter {
+  id        String   @id @default(cuid())
+  userId    String
+  weekStart DateTime
+  minutes   Int      @default(0)
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, weekStart])
+  @@index([userId, weekStart])
 }
 
 model Account {

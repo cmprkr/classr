@@ -1,3 +1,4 @@
+// src/app/api/classes/[classId]/upload/route.ts
 // API route: POST /api/classes/[classId]/upload
 
 import { NextRequest, NextResponse } from "next/server";
@@ -12,22 +13,34 @@ import path from "path";
 import { Readable } from "node:stream";
 import { ResourceType } from "@prisma/client";
 
-//aws
-import { TranscribeClient, StartTranscriptionJobCommand, GetTranscriptionJobCommand } from "@aws-sdk/client-transcribe";
+import { parseFile } from "music-metadata";
+import { getUsedMinutesThisWeek, addMinutesThisWeek, FREE_WEEKLY_MIN } from "@/lib/billing";
 
-// NEW: S3 client (no static creds; Amplify compute role provides them in prod)
+// AWS Transcribe & S3
+import {
+  TranscribeClient,
+  StartTranscriptionJobCommand,
+  GetTranscriptionJobCommand,
+} from "@aws-sdk/client-transcribe";
 import { S3Client } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// --- S3 configuration (set these in Amplify env) ---
+// --- S3 configuration ---
 const S3_BUCKET = process.env.S3_BUCKET!;
 const S3_REGION = process.env.S3_REGION!;
 const s3 = new S3Client({ region: S3_REGION });
 
-// ---------- Helpers (unchanged logic) ----------
+// --- Transcribe configuration ---
+const transcribe = new TranscribeClient({ region: S3_REGION });
+
+// Keep a margin under OpenAI’s ~25MB cap for audio uploads:
+const OPENAI_LIMIT = 24 * 1024 * 1024; // 24MB
+const AUDIO_EXT_RE = /\.(mp3|m4a|wav|aac|flac|ogg|oga|webm)$/i;
+
+// ---------- Helpers ----------
 async function safeEmbed(texts: string[]) {
   const inputs = texts.map((t) => (t ?? "").trim()).filter(Boolean);
   if (inputs.length === 0) return null;
@@ -64,16 +77,6 @@ Respond with only the label.`;
     temperature: 0,
   });
   const raw = (r.choices[0].message.content || "OTHER").trim().toUpperCase();
-  const validTypes: ResourceType[] = [
-    ResourceType.LECTURE,
-    ResourceType.SLIDESHOW,
-    ResourceType.NOTES,
-    ResourceType.HANDOUT,
-    ResourceType.GRADED_ASSIGNMENT,
-    ResourceType.UNGRADED_ASSIGNMENT,
-    ResourceType.GRADED_TEST,
-    ResourceType.OTHER,
-  ];
   const map: Record<string, ResourceType> = {
     LECTURE: ResourceType.LECTURE,
     SLIDESHOW: ResourceType.SLIDESHOW,
@@ -114,21 +117,16 @@ async function ocrImageWithVision(filePath: string): Promise<string> {
 async function readTxt(filePath: string) {
   return await fsp.readFile(filePath, "utf8");
 }
-
 async function readPdf(filePath: string) {
   const { default: pdfParse } = await import("pdf-parse/lib/pdf-parse.js");
   const data = await pdfParse(await fsp.readFile(filePath));
   return data.text || "";
 }
-
 async function readDocx(filePath: string) {
   const { default: mammoth } = await import("mammoth");
   const { value } = await mammoth.extractRawText({ path: filePath });
   return value || "";
 }
-
-const transcribe = new TranscribeClient({ region: S3_REGION });
-const OPENAI_LIMIT = 24 * 1024 * 1024; // keep a safety margin under ~25MB
 
 async function transcribeWithOpenAI(filePath: string) {
   const fileStream = fs.createReadStream(filePath, { highWaterMark: 1024 * 1024 * 4 });
@@ -147,36 +145,46 @@ async function transcribeWithOpenAI(filePath: string) {
   return { text, segments, duration };
 }
 
-async function startTranscribeForS3Key(bucket: string, key: string, lang: "en-US" | "auto" = "en-US") {
-  const jobName = `classr-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
-  await transcribe.send(new StartTranscriptionJobCommand({
-    TranscriptionJobName: jobName,
-    Media: { MediaFileUri: `s3://${bucket}/${key}` }, // <-- s3 URI
-    MediaFormat: "mp3",
-    LanguageCode: lang === "en-US" ? "en-US" : undefined,
-    IdentifyLanguage: lang === "auto" ? true : undefined,
-  }));
+async function startTranscribeForS3Key(
+  bucket: string,
+  key: string,
+  lang: "en-US" | "auto" = "en-US"
+) {
+  const jobName = `classr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  await transcribe.send(
+    new StartTranscriptionJobCommand({
+      TranscriptionJobName: jobName,
+      Media: { MediaFileUri: `s3://${bucket}/${key}` }, // s3 URI
+      MediaFormat: "mp3",
+      LanguageCode: lang === "en-US" ? "en-US" : undefined,
+      IdentifyLanguage: lang === "auto" ? true : undefined,
+    })
+  );
   return jobName;
 }
 
 async function waitTranscribe(jobName: string, timeoutMs = 60 * 60 * 1000, pollMs = 5000) {
   const start = Date.now();
   while (true) {
-    const r = await transcribe.send(new GetTranscriptionJobCommand({ TranscriptionJobName: jobName }));
+    const r = await transcribe.send(
+      new GetTranscriptionJobCommand({ TranscriptionJobName: jobName })
+    );
     const s = r.TranscriptionJob?.TranscriptionJobStatus;
     if (s === "COMPLETED") return r;
     if (s === "FAILED") throw new Error(r.TranscriptionJob?.FailureReason || "Transcribe failed");
     if (Date.now() - start > timeoutMs) throw new Error("Transcribe timeout");
-    await new Promise(res => setTimeout(res, pollMs));
+    await new Promise((res) => setTimeout(res, pollMs));
   }
 }
 
 async function fetchTranscriptText(uri: string) {
-  const json = await fetch(uri).then(r => r.json());
-  // Concatenate full text
-  const full = (json?.results?.transcripts || []).map((t: any) => t?.transcript || "").join(" ").trim();
+  const json = await fetch(uri).then((r) => r.json());
+  const full = (json?.results?.transcripts || [])
+    .map((t: any) => t?.transcript || "")
+    .join(" ")
+    .trim();
 
-  // Build coarse segments (~15s windows) from word timings for your chunking
+  // build coarse ~15s segments from word timings
   const items: any[] = json?.results?.items || [];
   const words = items.filter((i: any) => i.type === "pronunciation");
   const segments: { start: number; end: number; text: string }[] = [];
@@ -185,7 +193,6 @@ async function fetchTranscriptText(uri: string) {
   let lastEnd = winStart;
 
   for (const w of words) {
-    const st = Math.floor(parseFloat(w.start_time));
     const et = Math.ceil(parseFloat(w.end_time || w.start_time));
     curText.push(w.alternatives?.[0]?.content || "");
     lastEnd = et;
@@ -204,9 +211,9 @@ async function fetchTranscriptText(uri: string) {
 // ---------- Route handler ----------
 export async function POST(
   req: NextRequest,
-  ctx: { params: Promise<{ classId: string }> }
+  ctx: { params: { classId: string } } // <- plain object, not a Promise
 ) {
-  const { classId } = await ctx.params;
+  const { classId } = ctx.params;
   const user = await requireUser();
 
   const clazz = await db.class.findFirst({
@@ -215,9 +222,9 @@ export async function POST(
   });
   if (!clazz) return NextResponse.json({ error: "class not found" }, { status: 404 });
 
-  const effectiveSyncKey = clazz.syncEnabled ? (clazz.syncKey ?? null) : null;
+  const effectiveSyncKey = clazz.syncEnabled ? clazz.syncKey ?? null : null;
 
-  // Use /tmp in production (Amplify runtime). Keep local path in dev.
+  // Use /tmp in prod; local path in dev.
   const isProd = process.env.NODE_ENV === "production";
   const tmpRoot = isProd ? "/tmp/uploads" : uploadsPath();
   await fsp.mkdir(tmpRoot, { recursive: true });
@@ -233,7 +240,7 @@ export async function POST(
 
   const results: any[] = [];
 
-  // --------- Manual text-only path (unchanged) ----------
+  // --------- Manual text-only path ----------
   if (!files.length && manualText.trim()) {
     const lec = await db.lecture.create({
       data: {
@@ -251,7 +258,11 @@ export async function POST(
     });
 
     const segments = [
-      { start: 0, end: Math.min(300, Math.ceil(manualText.length / 6)), text: manualText.slice(0, 12000) },
+      {
+        start: 0,
+        end: Math.min(300, Math.ceil(manualText.length / 6)),
+        text: manualText.slice(0, 12000),
+      },
     ];
     const chunks = chunkTranscript(segments);
 
@@ -321,6 +332,44 @@ export async function POST(
     }
 
     const mime = f.type || "";
+    const isAudio = /^audio\//.test(mime) || AUDIO_EXT_RE.test(filenameSafe);
+
+    // --- Paywall gate: estimate minutes BEFORE transcription/DB row ---
+    if (isAudio) {
+      let estMinutes = 0;
+      try {
+        const meta = await parseFile(tempPath);
+        const durSec = Math.ceil(meta.format.duration ?? 0);
+        estMinutes = Math.max(1, Math.ceil(durSec / 60));
+      } catch {
+        estMinutes = 0; // unknown → don't block spuriously
+      }
+
+      // Fetch plan & usage
+      const u = await db.user.findUnique({
+        where: { id: user.id },
+        select: { planTier: true, planStatus: true },
+      });
+      const premium = u?.planTier === "PREMIUM" && u?.planStatus === "active";
+
+      if (!premium && estMinutes > 0) {
+        const { minutes } = await getUsedMinutesThisWeek(user.id);
+        if (minutes + estMinutes > FREE_WEEKLY_MIN) {
+          if (isProd) {
+            try {
+              await fsp.unlink(tempPath);
+            } catch {}
+          }
+          results.push({
+            file: f.name,
+            status: "FAILED",
+            error: `Weekly audio limit reached: ${minutes}/${FREE_WEEKLY_MIN} minutes used. Upgrade for unlimited.`,
+          });
+          continue; // next file
+        }
+      }
+    }
+
     const kindInput = form.get(`kind_${f.name}`) as string;
     const validTypes = Object.values(ResourceType);
     const kind: ResourceType = validTypes.includes(kindInput as ResourceType)
@@ -366,89 +415,161 @@ export async function POST(
       let textContent = "";
       let durationSec: number | null = null;
 
-      // Optional: cap transcription size
-      const TRANSCRIBE_MAX = 1024 * 1024 * 200; // 200MB
-      const canTranscribe =
-        /^audio\//.test(mime) && (typeof f.size !== "number" || f.size <= TRANSCRIBE_MAX);
-
-      if (canTranscribe && /^audio\//.test(mime)) {
+      if (isAudio) {
         if (!isProd) {
-          // Dev: keep OpenAI path (files are small in dev)
-          const fileStream = fs.createReadStream(tempPath, { highWaterMark: 1024 * 1024 * 4 });
-          const tr: any = await openai.audio.transcriptions.create({
-            model: MODELS.stt,
-            file: fileStream as any,
-            response_format: "verbose_json",
+          // Dev: OpenAI path
+          const r = await transcribeWithOpenAI(tempPath);
+          transcriptText = r.text;
+          durationSec = r.duration;
+
+          await db.lecture.update({
+            where: { id: lec.id },
+            data: { durationSec, transcript: transcriptText, segmentsJson: JSON.stringify(r.segments) },
           });
-          const segs = (tr.segments || []).map((s: any) => ({ start: Math.floor(s.start), end: Math.ceil(s.end), text: s.text }));
-          transcriptText = tr.text || segs.map((s: any) => s.text).join(" ");
-          durationSec = Math.ceil(tr.duration ?? (segs.at(-1)?.end ?? 0));
-          // ... (keep your existing DB writes + embedding code)
-        } else {
-          // Prod: choose provider by size (avoid ffmpeg entirely)
-          const size = typeof f.size === "number" ? f.size : 0;
 
-          if (size <= OPENAI_LIMIT) {
-            // small → OpenAI (fast path)
-            const fileStream = fs.createReadStream(tempPath, { highWaterMark: 1024 * 1024 * 4 });
-            const tr: any = await openai.audio.transcriptions.create({
-              model: MODELS.stt,
-              file: fileStream as any,
-              response_format: "verbose_json",
+          const chunks = chunkTranscript(r.segments);
+          for (const c of chunks) {
+            await db.chunk.create({
+              data: {
+                classId,
+                lectureId: lec.id,
+                source: "transcript",
+                startSec: c.start,
+                endSec: c.end,
+                text: c.text,
+                vectorJson: "",
+              },
             });
-            const segs = (tr.segments || []).map((s: any) => ({ start: Math.floor(s.start), end: Math.ceil(s.end), text: s.text }));
-            transcriptText = tr.text || segs.map((s: any) => s.text).join(" ");
-            durationSec = Math.ceil(tr.duration ?? (segs.at(-1)?.end ?? 0));
-
-            await db.lecture.update({
-              where: { id: lec.id },
-              data: { durationSec, transcript: transcriptText, segmentsJson: JSON.stringify(segs) },
-            });
-
-            const chunks = chunkTranscript(segs);
-            for (const c of chunks) {
-              await db.chunk.create({ data: { classId, lectureId: lec.id, source: "transcript", startSec: c.start, endSec: c.end, text: c.text, vectorJson: "" } });
-            }
-            try {
-              const emb = await safeEmbed(chunks.map((c) => c.text));
-              if (emb) for (let i = 0; i < chunks.length; i++) {
+          }
+          try {
+            const emb = await safeEmbed(chunks.map((c) => c.text));
+            if (emb) {
+              for (let i = 0; i < chunks.length; i++) {
                 await db.chunk.updateMany({
-                  where: { lectureId: lec.id, source: "transcript", startSec: chunks[i].start, endSec: chunks[i].end, vectorJson: "" },
+                  where: {
+                    lectureId: lec.id,
+                    source: "transcript",
+                    startSec: chunks[i].start,
+                    endSec: chunks[i].end,
+                    vectorJson: "",
+                  },
                   data: { vectorJson: JSON.stringify(emb.data[i].embedding) },
                 });
               }
-            } catch (e: any) { console.error("embed failed (audio small):", e?.message || e); }
+            }
+          } catch (e: any) {
+            console.error("embed failed (audio dev):", e?.message || e);
+          }
+        } else {
+          // Prod: choose provider by size
+          const size = typeof f.size === "number" ? f.size : 0;
 
+          if (size <= OPENAI_LIMIT) {
+            // small → OpenAI
+            const r = await transcribeWithOpenAI(tempPath);
+            transcriptText = r.text;
+            durationSec = r.duration;
+
+            await db.lecture.update({
+              where: { id: lec.id },
+              data: { durationSec, transcript: transcriptText, segmentsJson: JSON.stringify(r.segments) },
+            });
+
+            const chunks = chunkTranscript(r.segments);
+            for (const c of chunks) {
+              await db.chunk.create({
+                data: {
+                  classId,
+                  lectureId: lec.id,
+                  source: "transcript",
+                  startSec: c.start,
+                  endSec: c.end,
+                  text: c.text,
+                  vectorJson: "",
+                },
+              });
+            }
+            try {
+              const emb = await safeEmbed(chunks.map((c) => c.text));
+              if (emb) {
+                for (let i = 0; i < chunks.length; i++) {
+                  await db.chunk.updateMany({
+                    where: {
+                      lectureId: lec.id,
+                      source: "transcript",
+                      startSec: chunks[i].start,
+                      endSec: chunks[i].end,
+                      vectorJson: "",
+                    },
+                    data: { vectorJson: JSON.stringify(emb.data[i].embedding) },
+                  });
+                }
+              }
+            } catch (e: any) {
+              console.error("embed failed (audio small):", e?.message || e);
+            }
           } else {
-            // large → Amazon Transcribe (we already uploaded to S3 above)
-            if (!s3Key) throw new Error("No S3 key available for Transcribe");
+            // large → Amazon Transcribe
             const job = await startTranscribeForS3Key(S3_BUCKET, s3Key, "en-US");
             const done = await waitTranscribe(job);
             const uri = done.TranscriptionJob?.Transcript?.TranscriptFileUri;
             if (!uri) throw new Error("No transcript URI from Transcribe");
 
-            const { text: tText, segments: segs, duration } = await fetchTranscriptText(uri);
-            transcriptText = tText;
-            durationSec = duration;
+            const r = await fetchTranscriptText(uri);
+            transcriptText = r.text;
+            durationSec = r.duration;
 
             await db.lecture.update({
               where: { id: lec.id },
-              data: { durationSec, transcript: transcriptText, segmentsJson: JSON.stringify(segs) },
+              data: { durationSec, transcript: transcriptText, segmentsJson: JSON.stringify(r.segments) },
             });
 
-            const chunks = chunkTranscript(segs);
+            const chunks = chunkTranscript(r.segments);
             for (const c of chunks) {
-              await db.chunk.create({ data: { classId, lectureId: lec.id, source: "transcript", startSec: c.start, endSec: c.end, text: c.text, vectorJson: "" } });
+              await db.chunk.create({
+                data: {
+                  classId,
+                  lectureId: lec.id,
+                  source: "transcript",
+                  startSec: c.start,
+                  endSec: c.end,
+                  text: c.text,
+                  vectorJson: "",
+                },
+              });
             }
             try {
               const emb = await safeEmbed(chunks.map((c) => c.text));
-              if (emb) for (let i = 0; i < chunks.length; i++) {
-                await db.chunk.updateMany({
-                  where: { lectureId: lec.id, source: "transcript", startSec: chunks[i].start, endSec: chunks[i].end, vectorJson: "" },
-                  data: { vectorJson: JSON.stringify(emb.data[i].embedding) },
-                });
+              if (emb) {
+                for (let i = 0; i < chunks.length; i++) {
+                  await db.chunk.updateMany({
+                    where: {
+                      lectureId: lec.id,
+                      source: "transcript",
+                      startSec: chunks[i].start,
+                      endSec: chunks[i].end,
+                      vectorJson: "",
+                    },
+                    data: { vectorJson: JSON.stringify(emb.data[i].embedding) },
+                  });
+                }
               }
-            } catch (e: any) { console.error("embed failed (audio large):", e?.message || e); }
+            } catch (e: any) {
+              console.error("embed failed (audio large):", e?.message || e);
+            }
+          }
+        }
+
+        // After we know actual duration, increment usage for FREE users
+        if (durationSec && durationSec > 0) {
+          const u2 = await db.user.findUnique({
+            where: { id: user.id },
+            select: { planTier: true, planStatus: true },
+          });
+          const premium = u2?.planTier === "PREMIUM" && u2?.planStatus === "active";
+          if (!premium) {
+            const minutesActual = Math.max(1, Math.ceil(durationSec / 60));
+            await addMinutesThisWeek(user.id, minutesActual);
           }
         }
       } else if (mime === "application/pdf" || filenameSafe.toLowerCase().endsWith(".pdf")) {
@@ -466,7 +587,9 @@ export async function POST(
         if (/\.pdf$/i.test(filenameSafe)) textContent = await readPdf(tempPath);
         else if (/\.(txt|md)$/i.test(filenameSafe)) textContent = await readTxt(tempPath);
         else if (/\.docx$/i.test(filenameSafe)) textContent = await readDocx(tempPath);
-        else if (/\.(png|jpg|jpeg|gif|webp)$/i.test(filenameSafe)) textContent = await ocrImageWithVision(tempPath);
+        else if (/\.(png|jpg|jpeg|gif|webp)$/i.test(filenameSafe)) textContent = await ocrImageWithVision(
+          tempPath
+        );
       } else {
         textContent = "";
       }
@@ -519,49 +642,11 @@ export async function POST(
         },
       });
 
-      if (!transcriptText && (textContent || manualText2)) {
-        const text = (textContent || "") + (manualText2 ? `\n\n[User Notes]\n${manualText2}` : "");
-        const segments = [{ start: 0, end: Math.min(300, Math.ceil(text.length / 6)), text }];
-        const chunks = chunkTranscript(segments);
-
-        for (const c of chunks) {
-          await db.chunk.create({
-            data: {
-              classId,
-              lectureId: lec.id,
-              source: "document",
-              startSec: c.start,
-              endSec: c.end,
-              text: c.text,
-              vectorJson: "",
-            },
-          });
-        }
-
-        try {
-          const emb = await safeEmbed(chunks.map((c) => c.text));
-          if (emb) {
-            for (let i = 0; i < chunks.length; i++) {
-              await db.chunk.updateMany({
-                where: {
-                  lectureId: lec.id,
-                  source: "document",
-                  startSec: chunks[i].start,
-                  endSec: chunks[i].end,
-                  vectorJson: "",
-                },
-                data: { vectorJson: JSON.stringify(emb.data[i].embedding) },
-              });
-            }
-          }
-        } catch (e: any) {
-          console.error("embed failed (document):", e?.message || e);
-        }
-      }
-
       // Clean up temp file in prod
       if (isProd) {
-        try { await fsp.unlink(tempPath); } catch {}
+        try {
+          await fsp.unlink(tempPath);
+        } catch {}
       }
 
       results.push({ lectureId: lec.id, status: "READY", key: isProd ? s3Key : tempPath });
