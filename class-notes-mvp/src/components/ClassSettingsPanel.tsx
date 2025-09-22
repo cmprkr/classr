@@ -1,4 +1,3 @@
-// src/components/ClassSettingsPanel.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -28,35 +27,30 @@ function slugifyCountry(input: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
-// cache modules so we don't import the same file repeatedly
-const classesModuleCache = new Map<string, Promise<any>>();
-
-async function importClassesModule(country: string, primaryDomain: string) {
-  const countrySlug = slugifyCountry(country);
-  const domain = primaryDomain.toLowerCase();
-  const path = `data/universities/${countrySlug}/${domain}/classes.ts`;
-
-  if (!classesModuleCache.has(path)) {
-    classesModuleCache.set(path, import(/* @ts-ignore - dynamic segment */ path));
+async function fetchClassList(country: string, primaryDomain: string): Promise<UniClass[]> {
+  const qs = new URLSearchParams({
+    country: slugifyCountry(country),
+    domain: primaryDomain.toLowerCase(),
+  });
+  const r = await fetch(`/api/university-classes?${qs.toString()}`, { cache: "no-store" });
+  if (!r.ok) {
+    const txt = await r.text().catch(() => "");
+    throw new Error(txt || "Failed to load classes");
   }
-  return classesModuleCache.get(path)!;
+  const data = (await r.json()) as { classes: UniClass[] };
+  if (!Array.isArray(data?.classes)) throw new Error("Invalid classes payload");
+  return data.classes;
 }
 
 async function loadClassListForInstitution(inst: Institution) {
   const domain = (inst.domains?.[0] || "").toLowerCase();
   if (!domain) throw new Error("No domain found for selected school.");
 
-  const mod = await importClassesModule(inst.country, domain).catch(() => null);
-  const list: UniClass[] | undefined = mod?.CLASS_LIST;
-  if (!list) {
-    throw new Error(
-      `Classes not found at data/universities/${slugifyCountry(inst.country)}/${domain}/classes.ts`
-    );
-  }
+  const list = await fetchClassList(inst.country, domain);
   return list.map((c) => ({ value: c.syncKey, label: `${c.code} — ${c.name}` }));
 }
 
-/** Given a syncKey, find the institution whose CLASS_LIST contains it. */
+/** Given a syncKey, find the institution whose class list contains it. */
 async function resolveInstitutionBySyncKey(
   syncKey: string,
   insts: readonly Institution[]
@@ -65,23 +59,22 @@ async function resolveInstitutionBySyncKey(
     const domain = (inst.domains?.[0] || "").toLowerCase();
     if (!domain) continue;
     try {
-      const mod = await importClassesModule(inst.country, domain);
-      const list = mod?.CLASS_LIST as UniClass[] | undefined;
-      if (!list) continue;
+      const list = await fetchClassList(inst.country, domain);
       if (list.some((c) => c.syncKey === syncKey)) {
         return {
           domain,
           options: list.map((c) => ({ value: c.syncKey, label: `${c.code} — ${c.name}` })),
         };
       }
-    } catch {}
+    } catch {
+      // ignore and keep searching
+    }
   }
   return null;
 }
 
 // ---------- schedule types & helpers ----------
 type DayKey = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
-
 const ALL_DAYS: DayKey[] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 type ScheduleUniform = { start?: string; end?: string; timezone?: string };
@@ -141,7 +134,7 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
   const [error, setError] = useState<string | null>(null);
 
   const [name, setName] = useState("");
-  const [syncEnabled, setSyncEnabled] = useState(false); // ← fixed (removed stray "the")
+  const [syncEnabled, setSyncEnabled] = useState(false);
   const [syncKey, setSyncKey] = useState<string>("");
   const [isActive, setIsActive] = useState(true);
 
@@ -281,7 +274,7 @@ export default function ClassSettingsPanel({ classId }: { classId: string }) {
     return () => {
       mounted = false;
     };
-  }, [syncEnabled, selectedSchoolDomain]);
+  }, [syncEnabled, selectedSchoolDomain, syncKey]);
 
   // restore school + class from existing syncKey (on first load)
   useEffect(() => {
