@@ -1,51 +1,103 @@
+// src/app/api/university-classes/route.ts
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
 
+import { NextRequest, NextResponse } from "next/server";
 import path from "node:path";
 import fsp from "node:fs/promises";
 import { pathToFileURL } from "node:url";
-import { NextResponse } from "next/server";
 
-async function exists(p: string) {
-  try { await fsp.access(p); return true; } catch { return false; }
+function slugifyCountry(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
-export async function GET(req: Request) {
+type UniClass = { code: string; name: string; syncKey: string };
+
+async function fileExists(p: string) {
   try {
-    const { searchParams } = new URL(req.url);
-    const country = (searchParams.get("country") || "").trim().toLowerCase();
-    const domain  = (searchParams.get("domain")  || "").trim().toLowerCase();
+    await fsp.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const url = new URL(req.url);
+    const country = (url.searchParams.get("country") || "").trim();
+    const domain = (url.searchParams.get("domain") || "").trim().toLowerCase();
+
     if (!country || !domain) {
-      return NextResponse.json({ error: "country and domain required" }, { status: 400 });
-    }
-
-    const mjsPath  = path.join(process.cwd(), "data", "universities", country, domain, "classes.mjs");
-    const jsonPath = path.join(process.cwd(), "data", "universities", country, domain, "classes.json");
-
-    let classes: any[] | null = null;
-
-    if (await exists(mjsPath)) {
-      const mod = await import(pathToFileURL(mjsPath).href);
-      classes = mod?.default ?? mod?.CLASS_LIST ?? null;
-    } else if (await exists(jsonPath)) {
-      const raw = await fsp.readFile(jsonPath, "utf8");
-      classes = JSON.parse(raw);
-    }
-
-    if (!Array.isArray(classes)) {
       return NextResponse.json(
-        { error: `Classes not found at ${mjsPath} or ${jsonPath}` },
+        { error: "Missing query params: country & domain are required" },
+        { status: 400 }
+      );
+    }
+
+    const baseDir = path.join(
+      process.cwd(),
+      "data",
+      "universities",
+      slugifyCountry(country),
+      domain
+    );
+
+    const jsonPath = path.join(baseDir, "classes.json");
+    const mjsPath = path.join(baseDir, "classes.mjs");
+
+    let classes: UniClass[] | undefined;
+
+    if (await fileExists(jsonPath)) {
+      // JSON fast path
+      const buf = await fsp.readFile(jsonPath, "utf8");
+      const parsed = JSON.parse(buf);
+      if (Array.isArray(parsed)) classes = parsed as UniClass[];
+      else if (Array.isArray((parsed as any).classes)) classes = (parsed as any).classes as UniClass[];
+    } else if (await fileExists(mjsPath)) {
+      // MJS path — import the file directly at runtime (skip bundler)
+      // @ts-ignore
+      const mod = await import(/* webpackIgnore: true */ pathToFileURL(mjsPath).href);
+      const maybe =
+        (mod && (mod.CLASS_LIST as UniClass[] | undefined)) ||
+        (mod && (mod.default as UniClass[] | { classes?: UniClass[] } | undefined));
+
+      if (Array.isArray(maybe)) classes = maybe;
+      else if (maybe && Array.isArray((maybe as any).classes)) classes = (maybe as any).classes;
+    } else {
+      return NextResponse.json(
+        {
+          error: `No classes file found. Expected one of:\n- ${jsonPath}\n- ${mjsPath}`,
+        },
         { status: 404 }
       );
     }
 
-    const out = classes.map((c: any) => ({
-      code: String(c?.code ?? ""),
-      name: String(c?.name ?? ""),
-      syncKey: String(c?.syncKey ?? ""),
-    })).filter((c) => c.code && c.name && c.syncKey);
+    if (!classes || !Array.isArray(classes)) {
+      return NextResponse.json(
+        {
+          error:
+            "Classes file found but not in expected format. Expected an array of { code, name, syncKey }.",
+        },
+        { status: 422 }
+      );
+    }
 
-    return NextResponse.json({ classes: out });
+    // light validation
+    const cleaned = classes
+      .filter(
+        (c) =>
+          c &&
+          typeof c.code === "string" &&
+          typeof c.name === "string" &&
+          typeof c.syncKey === "string"
+      )
+      .map((c) => ({ code: c.code, name: c.name, syncKey: c.syncKey }));
+
+    return NextResponse.json({ classes: cleaned });
   } catch (e: any) {
     console.error("university-classes error:", e?.message || e);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
