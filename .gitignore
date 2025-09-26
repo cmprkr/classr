@@ -1,0 +1,23 @@
+# Node / Next
+**/node_modules/
+**/.next/
+**/.turbo/
+**/dist/
+**/out/
+**/coverage/
+
+# Env & local
+**/.env.local
+**/.env.development
+**/.env.production
+**/.env*
+.env
+.env.*
+pre-add-classType.schema.sql
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Uploads (server-only stuff)
+public/avatars/
