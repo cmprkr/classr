@@ -12,11 +12,30 @@ enum PlanTier {
   PREMIUM
 }
 
+enum ClassType {
+  GENERAL
+  HUMANITIES
+  MATH
+  PHYSICS
+  CHEMISTRY
+  BIOLOGY
+  CS
+  ENGINEERING
+  LITERATURE
+  LANGUAGE
+  ECONOMICS
+  BUSINESS
+  LAW
+  ART
+  MUSIC
+  OTHER
+}
+
 model User {
-  id            String            @id @default(cuid())
+  id            String    @id @default(cuid())
   name          String?
-  username      String?           @unique
-  email         String?           @unique
+  username      String?   @unique
+  email         String?   @unique
   emailVerified DateTime?
   image         String?
   passwordHash  String?
@@ -25,25 +44,25 @@ model User {
   defaultUniversityDomain String?
 
   // Billing
-  planTier              PlanTier @default(FREE)
-  planStatus            String?  // "active" | "trialing" | "past_due" | "canceled" | etc
-  stripeCustomerId      String?
-  stripeSubscriptionId  String?
-
-  @@index([stripeCustomerId])
-  @@index([stripeSubscriptionId])
+  planTier             PlanTier @default(FREE)
+  planStatus           String? // "active" | "trialing" | "past_due" | "canceled" | etc
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
 
   classes       Class[]
   chats         ChatMessage[]
   lectures      Lecture[]
   accounts      Account[]
   sessions      Session[]
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
   usageCounters UsageCounter[]
 
   // NEW: per-lecture user prefs
-  lecturePrefs  LectureUserPref[]
+  lecturePrefs LectureUserPref[]
+
+  @@index([stripeCustomerId])
+  @@index([stripeSubscriptionId])
 }
 
 model UsageCounter {
@@ -52,14 +71,14 @@ model UsageCounter {
   weekStart DateTime
   minutes   Int      @default(0)
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, weekStart])
   @@index([userId, weekStart])
 }
 
 model Account {
-  id                String @id @default(cuid())
+  id                String  @id @default(cuid())
   userId            String
   type              String
   provider          String
@@ -71,7 +90,7 @@ model Account {
   scope             String?
   id_token          String?
   session_state     String?
-  user              User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
 }
@@ -93,23 +112,25 @@ model VerificationToken {
 }
 
 model Class {
-  id          String     @id @default(cuid())
+  id          String        @id @default(cuid())
   name        String
   userId      String
-  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   lectures    Lecture[]
   chats       ChatMessage[]
   chunks      Chunk[]
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  syncEnabled Boolean    @default(false)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  syncEnabled Boolean       @default(false)
   syncKey     String?
 
   // serialized schedule config
   scheduleJson Json?
 
   // whether the user is actively taking this class
-  isActive    Boolean    @default(true)
+  isActive Boolean @default(true)
+
+  classType ClassType @default(GENERAL)
 }
 
 enum ResourceType {
@@ -124,42 +145,42 @@ enum ResourceType {
 }
 
 model Lecture {
-  id              String       @id @default(cuid())
-  classId         String
-  clazz           Class        @relation(fields: [classId], references: [id], onDelete: Cascade)
-  userId          String?
-  user            User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  kind            ResourceType @default(LECTURE)
-  descriptor      String?
-  mime            String?
-  textContent     String?
-  originalName    String
-  filePath        String?
-  status          String       @default("PROCESSING")
-  durationSec     Int?
-  transcript      String?
-  segmentsJson    String?
-  summaryJson     String?
-  chunks          Chunk[]
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-  syncKey         String?
+  id           String       @id @default(cuid())
+  classId      String
+  clazz        Class        @relation(fields: [classId], references: [id], onDelete: Cascade)
+  userId       String?
+  user         User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind         ResourceType @default(LECTURE)
+  descriptor   String?
+  mime         String?
+  textContent  String?
+  originalName String
+  filePath     String?
+  status       String       @default("PROCESSING")
+  durationSec  Int?
+  transcript   String?
+  segmentsJson String?
+  summaryJson  String?
+  chunks       Chunk[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  syncKey      String?
 
   // LEGACY: kept for back-compat; no longer authoritative
-  includeInMemory Boolean      @default(true)
+  includeInMemory     Boolean @default(true)
   includeInMemoryUser Json?
 
   // per-user prefs relation
-  userPrefs       LectureUserPref[]
+  userPrefs LectureUserPref[]
 
   @@index([syncKey])
   @@index([createdAt])
 }
 
 model LectureUserPref {
-  lectureId           String
-  userId              String
-  includeInAISummary  Boolean @default(true)
+  lectureId          String
+  userId             String
+  includeInAISummary Boolean @default(true)
 
   lecture Lecture @relation(fields: [lectureId], references: [id], onDelete: Cascade)
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -168,17 +189,17 @@ model LectureUserPref {
 }
 
 model Chunk {
-  id        String   @id @default(cuid())
-  classId   String
-  lectureId String
-  source    String
-  startSec  Int
-  endSec    Int
-  text      String
+  id         String   @id @default(cuid())
+  classId    String
+  lectureId  String
+  source     String
+  startSec   Int
+  endSec     Int
+  text       String
   vectorJson String   @default("")
-  createdAt DateTime @default(now())
-  clazz     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
-  lecture   Lecture  @relation(fields: [lectureId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  clazz      Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  lecture    Lecture  @relation(fields: [lectureId], references: [id], onDelete: Cascade)
 }
 
 model ChatMessage {
