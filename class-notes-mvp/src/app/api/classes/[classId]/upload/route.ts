@@ -1,5 +1,4 @@
 // src/app/api/classes/[classId]/upload/route.ts
-// API route: POST /api/classes/[classId]/upload
 
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
@@ -211,7 +210,7 @@ async function fetchTranscriptText(uri: string) {
 // ---------- Route handler ----------
 export async function POST(
   req: NextRequest,
-  ctx: { params: { classId: string } } // <- plain object, not a Promise
+  ctx: { params: { classId: string } }
 ) {
   const { classId } = ctx.params;
   const user = await requireUser();
@@ -560,17 +559,10 @@ export async function POST(
           }
         }
 
-        // After we know actual duration, increment usage for FREE users
+        // ---- Usage tracking (ALL plans) ----
         if (durationSec && durationSec > 0) {
-          const u2 = await db.user.findUnique({
-            where: { id: user.id },
-            select: { planTier: true, planStatus: true },
-          });
-          const premium = u2?.planTier === "PREMIUM" && u2?.planStatus === "active";
-          if (!premium) {
-            const minutesActual = Math.max(1, Math.ceil(durationSec / 60));
-            await addMinutesThisWeek(user.id, minutesActual);
-          }
+          const minutesActual = Math.max(1, Math.ceil(durationSec / 60));
+          await addMinutesThisWeek(user.id, minutesActual);
         }
       } else if (mime === "application/pdf" || filenameSafe.toLowerCase().endsWith(".pdf")) {
         textContent = await readPdf(tempPath);
@@ -688,7 +680,6 @@ export async function POST(
         });
         summaryContent = sum.choices[0].message.content ?? "";
       }
-
 
       await db.lecture.update({
         where: { id: lec.id },

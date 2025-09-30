@@ -22,6 +22,7 @@ export default function LectureSummaryPage({
   const [lecture, setLecture] = useState<Lecture | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [regenLoading, setRegenLoading] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -55,6 +56,29 @@ export default function LectureSummaryPage({
     currentParams.delete("lectureId");
     const qs = currentParams.toString();
     router.push(qs ? `/class/${classId}?${qs}` : `/class/${classId}`);
+  }
+
+  async function regenerateSummary() {
+    if (!lectureId) return;
+    setRegenLoading(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/lectures/${lectureId}/resummarize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!r.ok) {
+        const text = await r.text();
+        throw new Error(text || "Regeneration failed");
+      }
+      const data = await r.json(); // { summaryJson: string }
+      setLecture((prev) => prev ? { ...prev, summaryJson: data.summaryJson || "" } : prev);
+    } catch (e: any) {
+      setError(`Failed to regenerate summary: ${e.message}`);
+    } finally {
+      setRegenLoading(false);
+    }
   }
 
   const mdComponents = useMemo(
@@ -123,17 +147,36 @@ export default function LectureSummaryPage({
 
   return (
     <section className="h-full w-full bg-white flex flex-col">
-      {/* Header aligned with LEFT Back row (same padding + border) */}
-      <div className="px-4 py-4 border-b border-gray-200 flex items-center gap-3">
-        <button
-          onClick={goBack}
-          className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-black hover:bg-gray-100 cursor-pointer"
-        >
-          Back
-        </button>
-        <h1 className="text-sm font-semibold text-black truncate">
-          {lecture?.originalName || "Lecture Summary"}
-        </h1>
+      {/* Header */}
+      <div className="px-4 py-4 border-b border-gray-200 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={goBack}
+            className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-black hover:bg-gray-100 cursor-pointer"
+          >
+            Back
+          </button>
+          <h1 className="text-sm font-semibold text-black truncate">
+            {lecture?.originalName || "Lecture Summary"}
+          </h1>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={regenerateSummary}
+            disabled={regenLoading || loading}
+            aria-label="Regenerate summary"
+            className={[
+              "px-3 py-2 rounded-lg border text-sm cursor-pointer",
+              regenLoading || loading
+                ? "border-gray-300 text-gray-400 bg-gray-100 cursor-not-allowed"
+                : "border-gray-300 text-black hover:bg-gray-100",
+            ].join(" ")}
+            title="Re-run the summarization on this lecture"
+          >
+            {regenLoading ? "Regenerating…" : "Regenerate"}
+          </button>
+        </div>
       </div>
 
       {/* Content */}

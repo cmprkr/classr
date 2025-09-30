@@ -1,7 +1,6 @@
+// lib/billing.ts
 import { db } from "@/lib/db";
-import type { User } from "@prisma/client";
-import type { PlanTier } from "@prisma/client";
-
+import type { User, PlanTier } from "@prisma/client";
 
 export const FREE_WEEKLY_MIN = 100;
 
@@ -18,19 +17,34 @@ export function isPremium(u: Pick<User, "planTier" | "planStatus"> | null | unde
 
 export async function getUsedMinutesThisWeek(userId: string, when = new Date()) {
   const week = weekStartUTC(when);
-  const row = await db.usageCounter.findUnique({
+  const nextWeek = new Date(week.getTime() + 7 * 86400000);
+
+  // Fast path: exact match with current writer
+  const exact = await db.usageCounter.findUnique({
     where: { userId_weekStart: { userId, weekStart: week } },
     select: { minutes: true },
   });
-  return { weekStart: week, minutes: row?.minutes ?? 0 };
+  if (exact) return { weekStart: week, minutes: exact.minutes ?? 0 };
+
+  // Fallback: range sum for legacy anchors
+  const agg = await db.usageCounter.aggregate({
+    where: { userId, weekStart: { gte: week, lt: nextWeek } },
+    _sum: { minutes: true },
+  });
+
+  return { weekStart: week, minutes: agg._sum.minutes ?? 0 };
 }
 
 export async function addMinutesThisWeek(userId: string, minutes: number, when = new Date()) {
+  // Ensure integer minute policy (ceil) and drop zeros
+  const m = Math.max(0, Math.ceil(minutes));
+  if (m === 0) return;
+
   const week = weekStartUTC(when);
   await db.usageCounter.upsert({
     where: { userId_weekStart: { userId, weekStart: week } },
-    create: { userId, weekStart: week, minutes },
-    update: { minutes: { increment: minutes } },
+    create: { userId, weekStart: week, minutes: m },
+    update: { minutes: { increment: m } },
   });
 }
 
@@ -52,7 +66,7 @@ export function weeklyAllowanceFor(plan: PlanTier | null | undefined): number | 
 export async function getUsageSnapshot(userId: string, plan: PlanTier) {
   const { weekStart, minutes: usedThisWeek } = await getUsedMinutesThisWeek(userId);
   const allTime = await getAllTimeMinutes(userId);
-  const allowance = weeklyAllowanceFor(plan);               // null = unlimited
+  const allowance = weeklyAllowanceFor(plan); // null = unlimited
   const remaining = allowance == null ? null : Math.max(0, allowance - usedThisWeek);
   const resetsAt = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
 
@@ -61,8 +75,8 @@ export async function getUsageSnapshot(userId: string, plan: PlanTier) {
     allTime,
     allowance,     // number | null
     remaining,     // number | null
-    weekStart,
-    resetsAt,
-    plan,
+    weekStart: weekStart.toISOString(),
+    resetsAt: resetsAt.toISOString(),
+    plan,          // "FREE" | "PREMIUM"
   };
 }
