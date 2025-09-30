@@ -13,7 +13,7 @@ import { Readable } from "node:stream";
 import { ResourceType } from "@prisma/client";
 
 import { parseFile } from "music-metadata";
-import { getUsedMinutesThisWeek, addMinutesThisWeek, FREE_WEEKLY_MIN } from "@/lib/billing";
+import { getUsedMinutesThisWeek, addMinutesThisWeek, FREE_WEEKLY_MIN, weekStartUTC } from "@/lib/billing";
 
 // AWS Transcribe & S3
 import {
@@ -39,7 +39,7 @@ const transcribe = new TranscribeClient({ region: S3_REGION });
 const OPENAI_LIMIT = 24 * 1024 * 1024; // 24MB
 const AUDIO_EXT_RE = /\.(mp3|m4a|wav|aac|flac|ogg|oga|webm)$/i;
 
-// ---------- Helpers ----------
+// ---------- Shared helpers ----------
 async function safeEmbed(texts: string[]) {
   const inputs = texts.map((t) => (t ?? "").trim()).filter(Boolean);
   if (inputs.length === 0) return null;
@@ -207,6 +207,188 @@ async function fetchTranscriptText(uri: string) {
   return { text: full, segments, duration };
 }
 
+// ---------- Recorder-mode stitching (when parts come via this route) ----------
+type RecorderPart = {
+  chunkIndex: number;
+  text: string;
+  duration: number; // seconds (local to chunk)
+  segments: { start: number; end: number; text: string }[];
+};
+
+async function handleRecorderFinalize(
+  {
+    classId, userId, filename, descriptor, parts,
+  }: { classId: string; userId: string; filename: string; descriptor?: string; parts: RecorderPart[] }
+) {
+  // Sort parts and build global transcript/segments
+  parts.sort((a, b) => a.chunkIndex - b.chunkIndex);
+  const totalSec = parts.reduce((s, p) => s + Math.max(0, Math.floor(p.duration || 0)), 0);
+  const totalMin = Math.max(1, Math.ceil(totalSec / 60));
+
+  let offset = 0;
+  let transcriptText = "";
+  const globalSegments: { start: number; end: number; text: string }[] = [];
+
+  for (const p of parts) {
+    const dur = Math.max(0, Math.floor(p.duration || 0));
+    const t = (p.text || "").trim();
+    if (t) transcriptText += (transcriptText ? " " : "") + t;
+    for (const s of p.segments || []) {
+      const start = Math.max(0, Math.floor((s.start || 0) + offset));
+      const end = Math.max(start, Math.floor((s.end || 0) + offset));
+      const txt = String(s.text || "").trim();
+      if (txt) globalSegments.push({ start, end, text: txt });
+    }
+    offset += dur;
+  }
+
+  // Create lecture
+  const lec = await db.lecture.create({
+    data: {
+      classId,
+      userId,
+      originalName: filename,
+      mime: "audio/webm",
+      descriptor,
+      kind: "LECTURE",
+      status: "PROCESSING",
+      transcript: transcriptText,
+      durationSec: totalSec,
+      segmentsJson: JSON.stringify(globalSegments),
+    },
+    select: { id: true },
+  });
+
+  // Create chunks + embeddings
+  const chunks = chunkTranscript(globalSegments);
+  for (const c of chunks) {
+    await db.chunk.create({
+      data: {
+        classId,
+        lectureId: lec.id,
+        source: "transcript",
+        startSec: c.start,
+        endSec: c.end,
+        text: c.text,
+        vectorJson: "",
+      },
+    });
+  }
+
+  try {
+    const emb = await safeEmbed(chunks.map((c) => c.text));
+    if (emb) {
+      for (let i = 0; i < chunks.length; i++) {
+        await db.chunk.updateMany({
+          where: {
+            lectureId: lec.id,
+            source: "transcript",
+            startSec: chunks[i].start,
+            endSec: chunks[i].end,
+            vectorJson: "",
+          },
+          data: { vectorJson: JSON.stringify(emb.data[i].embedding) },
+        });
+      }
+    }
+  } catch (e: any) {
+    console.error("upload(recorder): embedding failed:", e?.message || e);
+  }
+
+  // Generate summary
+  let summaryContent = "";
+  const basis = transcriptText.slice(0, 12000);
+  if (basis) {
+    const sum = await openai.chat.completions.create({
+      model: MODELS.chat,
+      temperature: 0.1,
+      messages: [
+        {
+          role: "system",
+          content: [
+            "You are a rigorous, non-hallucinating note composer for college STEM courses.",
+            "Your job: produce a highly structured, detailed Markdown summary that is consistent across inputs and faithful to the source.",
+            "Rules:",
+            "1) Do NOT invent facts. If something is not present in the source, write “Not stated in source.”",
+            "2) Prefer equations, units, and constraints exactly as given.",
+            "3) Use the required headings verbatim and in the exact order.",
+            "4) Keep wording concise, but do not omit core steps, definitions, or assumptions.",
+            "5) If the input is long, first infer a clean outline of sections/topics, then aggregate into the required format.",
+            "6) Use tables where indicated; never change column names.",
+            "7) If no explicit homework is provided, generate 5 practice problems strictly grounded in the presented material (no outside facts). Provide brief answers at the end.",
+            "8) If symbols or variables appear, define them once in Key Terms and refer back consistently.",
+            "9) If a formula depends on conditions, list them under “Constraints/Conditions”.",
+            "10) If examples are present in the source, preserve their numbers/values; if not, create 1–2 short worked examples using only source formulas/definitions.",
+          ].join("\n"),
+        },
+        {
+          role: "user",
+          content: [
+            "Create a comprehensive, structured Markdown document titled with the inferred topic, exactly in this format:",
+            "",
+            "# {{Inferred Topic}} Summary",
+            "",
+            "## TL;DR",
+            "- 5–8 bullets capturing the most important takeaways and results.",
+            "",
+            "## Key Terms & Symbols",
+            "| Term/Symbol | Definition (from source) | Units | Notes |",
+            "|---|---|---|---|",
+            "- Include every symbol or specialized term that appears. If none: “Not stated in source.”",
+            "",
+            "## Main Ideas (Numbered)",
+            "1. Core idea 1 — 1–3 sentence explanation.",
+            "2. Core idea 2 — 1–3 sentence explanation.",
+            "3. Core idea 3 — etc.",
+            "",
+            "## Core Formulas",
+            "| Formula | Meaning | Variables Defined | Units | Constraints/Conditions |",
+            "|---|---|---|---|---|",
+            "- Show formulas exactly (use inline math like `x = vt` if LaTeX unavailable).",
+            "",
+            "## Procedures / Derivations (Step-by-Step)",
+            "- Break multi-step derivations or procedures into numbered steps.",
+            "- State assumptions at the top of each procedure.",
+            "",
+            "## Worked Examples",
+            "- **Example 1**",
+            "  - *Given:* …",
+            "  - *Find:* …",
+            "  - *Solution (steps):* …",
+            "  - *Answer:* …",
+            "- **Example 2** (if source lacks examples, craft one consistent with the text)",
+            "",
+            "## Edge Cases & Common Pitfalls",
+            "- List tricky cases, boundary conditions, sign conventions, unit mix-ups, typical mistakes.",
+            "",
+            "## Connections & Prerequisites",
+            "- Briefly note prior concepts needed and how this topic links to others in the course.",
+            "",
+            "## Homework / Practice",
+            "- If the source lists homework: reproduce it faithfully.",
+            "- Otherwise: provide 5 original practice problems derived strictly from the content above (no outside facts).",
+            "",
+            "## Answers (Brief)",
+            "- Short answers or final numeric results for the practice problems (no full solutions).",
+            "",
+            "LECTURE TEXT (first ~12k chars follows):",
+            basis,
+          ].join("\n"),
+        },
+      ],
+    });
+    summaryContent = sum.choices[0].message.content ?? "";
+  }
+
+  await db.lecture.update({
+    where: { id: lec.id },
+    data: { status: "READY", summaryJson: summaryContent },
+  });
+
+  await addMinutesThisWeek(userId, totalMin);
+  return { lectureId: lec.id, durationSec: totalSec };
+}
+
 // ---------- Route handler ----------
 export async function POST(
   req: NextRequest,
@@ -228,7 +410,81 @@ export async function POST(
   const tmpRoot = isProd ? "/tmp/uploads" : uploadsPath();
   await fsp.mkdir(tmpRoot, { recursive: true });
 
+  // Accept either multipart (legacy or recorder parts) or JSON (rare)
+  const contentType = req.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    // Optional: allow recorder finalize via JSON to this endpoint too
+    const body = await req.json().catch(() => null as any);
+    if (Array.isArray(body?.parts) && body?.parts.length) {
+      const filename = String(body?.filename || `recording_${Date.now()}.webm`);
+      const descriptor = body?.descriptor || undefined;
+      const parts = body.parts as RecorderPart[];
+
+      // Free limit check based on *actual* duration
+      const totalSec = parts.reduce((s, p) => s + Math.max(0, Math.floor(p.duration || 0)), 0);
+      const totalMin = Math.max(1, Math.ceil(totalSec / 60));
+      const u = await db.user.findUnique({
+        where: { id: user.id },
+        select: { planTier: true, planStatus: true },
+      });
+      const premium = u?.planTier === "PREMIUM" && u?.planStatus === "active";
+      if (!premium) {
+        const { minutes } = await getUsedMinutesThisWeek(user.id);
+        if (minutes + totalMin > FREE_WEEKLY_MIN) {
+          return NextResponse.json(
+            { error: "limit_reached", detail: `Weekly audio limit: ${minutes}/${FREE_WEEKLY_MIN} used.` },
+            { status: 402 }
+          );
+        }
+      }
+
+      const out = await handleRecorderFinalize({ classId, userId: user.id, filename, descriptor, parts });
+      return NextResponse.json({ ok: true, ...out });
+    }
+    // Fall through to legacy behavior if not recorder JSON
+  }
+
+  // Multipart form (legacy upload OR recorder-parts-in-form)
   const form = await req.formData();
+
+  // Recorder-mode in multipart: `recordingParts` = JSON string of parts
+  const recorderPartsRaw = form.get("recordingParts");
+  if (recorderPartsRaw) {
+    let parts: RecorderPart[] = [];
+    try {
+      const parsed = JSON.parse(String(recorderPartsRaw));
+      if (Array.isArray(parsed)) parts = parsed;
+    } catch {}
+    if (!parts.length) {
+      return NextResponse.json({ error: "invalid recordingParts" }, { status: 400 });
+    }
+
+    const filename = String(form.get("filename") || `recording_${Date.now()}.webm`);
+    const descriptor = (form.get("descriptor") as string) || undefined;
+
+    // Enforce free limit based on actual duration
+    const totalSec = parts.reduce((s, p) => s + Math.max(0, Math.floor(p.duration || 0)), 0);
+    const totalMin = Math.max(1, Math.ceil(totalSec / 60));
+    const u = await db.user.findUnique({
+      where: { id: user.id },
+      select: { planTier: true, planStatus: true },
+    });
+    const premium = u?.planTier === "PREMIUM" && u?.planStatus === "active";
+    if (!premium) {
+      const { minutes } = await getUsedMinutesThisWeek(user.id);
+      if (minutes + totalMin > FREE_WEEKLY_MIN) {
+        return NextResponse.json(
+          { error: "limit_reached", detail: `Weekly audio limit: ${minutes}/${FREE_WEEKLY_MIN} used.` },
+          { status: 402 }
+        );
+      }
+    }
+
+    const out = await handleRecorderFinalize({ classId, userId: user.id, filename, descriptor, parts });
+    return NextResponse.json({ ok: true, ...out });
+  }
+
+  // ------- Legacy: file uploads path -------
   const files = form.getAll("file") as File[];
   const descriptor = (form.get("descriptor") as string) || undefined;
   const manualText = (form.get("manualText") as string) || "";
@@ -302,7 +558,7 @@ export async function POST(
     results.push({ lectureId: lec.id, status: "READY" });
   }
 
-  // --------- File uploads ----------
+  // --------- File uploads (legacy) ----------
   for (const f of files) {
     // Size guard
     const MAX_BYTES = 1024 * 1024 * 512; // 512MB
@@ -609,7 +865,7 @@ export async function POST(
                 "4) Keep wording concise, but do not omit core steps, definitions, or assumptions.",
                 "5) If the input is long, first infer a clean outline of sections/topics, then aggregate into the required format.",
                 "6) Use tables where indicated; never change column names.",
-                "7) If no explicit homework is provided, generate 5 practice problems strictly grounded in the presented material (no external facts). Provide brief answers at the end.",
+                "7) If no explicit homework is provided, generate 5 original practice problems strictly grounded in the content (no outside facts). Provide brief answers at the end.",
                 "8) If symbols or variables appear, define them once in Key Terms and refer back consistently.",
                 "9) If a formula depends on conditions, list them under “Constraints/Conditions”.",
                 "10) If examples are present in the source, preserve their numbers/values; if not, create 1–2 short worked examples using only source formulas/definitions.",
@@ -664,9 +920,6 @@ export async function POST(
                 "",
                 "## Answers (Brief)",
                 "- Short answers or final numeric results for the practice problems (no full solutions).",
-                "",
-                "## Glossary (Optional if redundant with Key Terms)",
-                "- Only include if additional everyday-language clarifications would help.",
                 "",
                 "## Source Notes",
                 "- If quoting, use backticks for short quotes.",
