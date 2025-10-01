@@ -1,3 +1,4 @@
+// src/components/ClassRightPane.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -84,7 +85,15 @@ export default function ClassRightPane({
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }
 
-  const showTopNav = tab !== "home"; // hide nav on Main page
+  // --- NEW: icon nav (always visible, includes Home) ---
+  const NAV = [
+    { key: "home" as const,   icon: "/icons/square-dashed.svg",          title: "Home" },
+    { key: "record" as const, icon: "/icons/mic.svg",                     title: "Recording" },
+    { key: "chat" as const,   icon: "/icons/message-circle-dots.svg",     title: "Chat" },
+    { key: "class" as const,  icon: "/icons/gear.svg",                    title: "Settings" },
+  ];
+
+  const isActive = (k: typeof NAV[number]["key"]) => tab === k;
 
   return (
     <div className="relative h-full w-full">
@@ -92,14 +101,9 @@ export default function ClassRightPane({
       {tab === "home" && (
         <div className="h-full w-full flex flex-col bg-white">
           <div className="px-4 py-4 border-b border-gray-200 flex items-center justify-between">
-            <h1 className="text-sm font-semibold text-black truncate">
-              Main
-            </h1>
+            <h1 className="text-sm font-semibold text-black truncate">Main</h1>
             {/* Invisible Back button placeholder */}
-            <button
-              disabled
-              className="invisible px-4 py-2 rounded-lg border border-gray-300 text-sm"
-            >
+            <button disabled className="invisible px-4 py-2 rounded-lg border border-gray-300 text-sm">
               Back
             </button>
           </div>
@@ -111,41 +115,43 @@ export default function ClassRightPane({
         </div>
       )}
 
-      {/* Top-right toggle (only for chat/record/settings) */}
-      {showTopNav && (
-        <div className="absolute right-4 top-4 z-30 rounded-lg border bg-white/80 backdrop-blur px-1 py-1 flex gap-1 shadow-sm">
-          <button
-            onClick={() => go("record")}
-            className={`px-3 py-1 rounded-md text-sm cursor-pointer ${
-              tab === "record" ? "bg-black text-white" : "text-black hover:bg-white"
-            }`}
-            title="Recording"
-          >
-            Recording
-            {recActive && (
-              <span className="ml-2 inline-block h-2 w-2 rounded-full bg-red-500 align-middle" />
-            )}
-          </button>
-          <button
-            onClick={() => go("chat")}
-            className={`px-3 py-1 rounded-md text-sm cursor-pointer ${
-              tab === "chat" ? "bg-black text-white" : "text-black hover:bg-white"
-            }`}
-            title="Class chat"
-          >
-            Chat
-          </button>
-          <button
-            onClick={() => go("class")}
-            className={`px-3 py-1 rounded-md text-sm cursor-pointer ${
-              tab === "class" ? "bg-black text-white" : "text-black hover:bg-white"
-            }`}
-            title="Settings"
-          >
-            Settings
-          </button>
-        </div>
-      )}
+      {/* Top-right icon nav (separate squares) */}
+      <div className="absolute right-4 top-4 z-30 flex gap-2">
+        {NAV.map(({ key, icon, title }) => {
+          const active = isActive(key);
+          const base =
+            "relative h-[36px] w-[36px] rounded-lg border flex items-center justify-center cursor-pointer transition";
+          const inactive =
+            "bg-white border-gray-300 hover:bg-gray-50 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-black/10";
+          const activeCls =
+            "bg-gray-100 border-gray-900 shadow-sm ring-1 ring-black/5";
+
+          return (
+            <button
+              key={key}
+              onClick={() => go(key)}
+              title={title}
+              aria-label={title}
+              aria-current={active ? "page" : undefined}
+              className={[base, active ? activeCls : inactive].join(" ")}
+            >
+              {/* give the SVG breathing room */}
+              <img
+                src={icon}
+                alt=""
+                className={["h-4 w-4", active ? "opacity-100" : "opacity-80"].join(" ")}
+                aria-hidden="true"
+              />
+
+              {/* recording status dot */}
+              {key === "record" && recActive && (
+                <span className="absolute top-1 right-1 inline-block h-2 w-2 rounded-full bg-red-500" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
 
       {/* RECORDING view */}
       {tab === "record" && <RecorderPanel />}

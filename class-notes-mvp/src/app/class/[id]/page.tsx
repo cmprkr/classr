@@ -1,3 +1,4 @@
+// src/app/class/[id]/page.tsx
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import Link from "next/link";
