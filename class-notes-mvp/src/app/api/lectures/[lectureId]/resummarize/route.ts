@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { openai, MODELS } from "@/lib/openai";
 import { buildSummaryMessages } from "@/lib/prompts/summary";
+import { generateKeyTerms } from "@/lib/prompts/keyterms";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,9 +44,14 @@ export async function POST(
   });
   const summaryJson = resp.choices[0].message.content ?? "";
 
+  let keyTerms: string[] = [];
+  try { if (basis) keyTerms = await generateKeyTerms(basis); } catch (e) {
+    console.error("keyterms(resummarize):", (e as any)?.message || e);
+  }
+
   await db.lecture.update({
     where: { id: lecture.id },
-    data: { summaryJson },
+    data: { summaryJson, keyTermsJson: keyTerms },
   });
 
   return NextResponse.json({ summaryJson });

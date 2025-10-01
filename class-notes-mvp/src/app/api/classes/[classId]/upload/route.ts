@@ -12,6 +12,7 @@ import path from "path";
 import { Readable } from "node:stream";
 import { ResourceType } from "@prisma/client";
 import { buildSummaryMessages } from "@/lib/prompts/summary";
+import { generateKeyTerms } from "@/lib/prompts/keyterms";
 
 import { parseFile } from "music-metadata";
 import { getUsedMinutesThisWeek, addMinutesThisWeek, FREE_WEEKLY_MIN, weekStartUTC } from "@/lib/billing";
@@ -311,9 +312,13 @@ async function handleRecorderFinalize(
     summaryContent = sum.choices[0].message.content ?? "";
   }
 
+  let keyTerms: string[] = [];
+  try { if (basis) keyTerms = await generateKeyTerms(basis); } catch (e) {
+    console.error("keyterms(recorder):", (e as any)?.message || e);
+  }
   await db.lecture.update({
     where: { id: lec.id },
-    data: { status: "READY", summaryJson: summaryContent },
+    data: { status: "READY", summaryJson: summaryContent, keyTermsJson: keyTerms },
   });
 
   await addMinutesThisWeek(userId, totalMin);
@@ -793,6 +798,11 @@ export async function POST(
         summaryContent = sum.choices[0].message.content ?? "";
       }
 
+      let keyTerms: string[] = [];
+      try { if (basis) keyTerms = await generateKeyTerms(basis); } catch (e) {
+        console.error("keyterms(legacy):", (e as any)?.message || e);
+      }
+
       await db.lecture.update({
         where: { id: lec.id },
         data: {
@@ -802,6 +812,7 @@ export async function POST(
           textContent: textContent || undefined,
           summaryJson: summaryContent,
           descriptor: descriptor || undefined,
+          keyTermsJson: keyTerms,
         },
       });
 

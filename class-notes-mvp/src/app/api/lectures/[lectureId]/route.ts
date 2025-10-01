@@ -1,3 +1,4 @@
+//src/app/api/lectures/[lectureId]/route.ts
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";

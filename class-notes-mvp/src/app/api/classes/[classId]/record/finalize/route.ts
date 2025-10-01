@@ -6,6 +6,7 @@ import { openai, MODELS } from "@/lib/openai";
 import { chunkTranscript } from "@/lib/chunking";
 import { buildSummaryMessages } from "@/lib/prompts/summary";
 import { getUsedMinutesThisWeek, addMinutesThisWeek, FREE_WEEKLY_MIN } from "@/lib/billing";
+import { generateKeyTerms } from "@/lib/prompts/keyterms";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -150,12 +151,17 @@ export async function POST(
     summaryContent = sum.choices[0].message.content ?? "";
   }
 
+  let keyTerms: string[] = [];
+  try {
+    const basis = transcriptText.slice(0, 12000);
+    if (basis) keyTerms = await generateKeyTerms(basis);
+  } catch (e) {
+    console.error("keyterms(record/finalize):", (e as any)?.message || e);
+  }
+
   await db.lecture.update({
     where: { id: lec.id },
-    data: {
-      status: "READY",
-      summaryJson: summaryContent,
-    },
+    data: { status: "READY", summaryJson: summaryContent, keyTermsJson: keyTerms },
   });
 
   // Track usage for ALL plans
