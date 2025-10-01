@@ -49,6 +49,8 @@ model User {
   stripeCustomerId     String?
   stripeSubscriptionId String?
 
+  admin         Boolean   @default(false)
+
   classes       Class[]
   chats         ChatMessage[]
   lectures      Lecture[]
@@ -165,6 +167,7 @@ model Lecture {
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   syncKey      String?
+  keyTermsJson Json?
 
   // LEGACY: kept for back-compat; no longer authoritative
   includeInMemory     Boolean @default(true)
