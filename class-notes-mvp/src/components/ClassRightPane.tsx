@@ -1,4 +1,3 @@
-// src/components/ClassRightPane.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -85,12 +84,12 @@ export default function ClassRightPane({
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }
 
-  // --- NEW: icon nav (always visible, includes Home) ---
+  // Icon nav model
   const NAV = [
-    { key: "home" as const,   icon: "/icons/square-dashed.svg",          title: "Home" },
-    { key: "record" as const, icon: "/icons/mic.svg",                     title: "Recording" },
-    { key: "chat" as const,   icon: "/icons/message-circle-dots.svg",     title: "Chat" },
-    { key: "class" as const,  icon: "/icons/gear.svg",                    title: "Settings" },
+    { key: "home" as const,   icon: "/icons/square-dashed.svg",      title: "Home" },
+    { key: "record" as const, icon: "/icons/mic.svg",                 title: "Recording" },
+    { key: "chat" as const,   icon: "/icons/message-circle-dots.svg", title: "Chat" },
+    { key: "class" as const,  icon: "/icons/gear.svg",                title: "Settings" },
   ];
 
   const isActive = (k: typeof NAV[number]["key"]) => tab === k;
@@ -102,8 +101,11 @@ export default function ClassRightPane({
         <div className="h-full w-full flex flex-col bg-white">
           <div className="px-4 py-4 border-b border-gray-200 flex items-center justify-between">
             <h1 className="text-sm font-semibold text-black truncate">Main</h1>
-            {/* Invisible Back button placeholder */}
-            <button disabled className="invisible px-4 py-2 rounded-lg border border-gray-300 text-sm">
+            {/* Invisible Back button placeholder (keeps header height consistent) */}
+            <button
+              disabled
+              className="invisible px-4 py-2 rounded-lg border border-gray-300 text-sm"
+            >
               Back
             </button>
           </div>
@@ -115,8 +117,25 @@ export default function ClassRightPane({
         </div>
       )}
 
-      {/* Top-right icon nav (separate squares) */}
-      <div className="absolute right-4 top-4 z-30 flex gap-2">
+      {/* Top-right icon nav (separate squares; always visible).
+          Includes conditional Refresh button on far left ONLY when summary overlay is open. */}
+      <div className="absolute right-4 top-4 z-30 flex items-center gap-2">
+        {/* Refresh button — only when the lecture overlay is shown */}
+        {viewLecture && lectureId && (
+          <button
+            type="button"
+            title="Refresh summary"
+            aria-label="Refresh summary"
+            onClick={() => window.dispatchEvent(new CustomEvent("lecture:regenerate"))}
+            className={[
+              "h-[36px] w-[36px] rounded-lg border flex items-center justify-center cursor-pointer transition",
+              "bg-green-50 border-green-200 hover:bg-green-100 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-green-300/50",
+            ].join(" ")}
+          >
+            <img src="/icons/refresh.svg" alt="" className="h-4 w-4 opacity-90" aria-hidden="true" />
+          </button>
+        )}
+
         {NAV.map(({ key, icon, title }) => {
           const active = isActive(key);
           const base =
@@ -135,14 +154,12 @@ export default function ClassRightPane({
               aria-current={active ? "page" : undefined}
               className={[base, active ? activeCls : inactive].join(" ")}
             >
-              {/* give the SVG breathing room */}
               <img
                 src={icon}
                 alt=""
                 className={["h-4 w-4", active ? "opacity-100" : "opacity-80"].join(" ")}
                 aria-hidden="true"
               />
-
               {/* recording status dot */}
               {key === "record" && recActive && (
                 <span className="absolute top-1 right-1 inline-block h-2 w-2 rounded-full bg-red-500" />
@@ -151,7 +168,6 @@ export default function ClassRightPane({
           );
         })}
       </div>
-
 
       {/* RECORDING view */}
       {tab === "record" && <RecorderPanel />}

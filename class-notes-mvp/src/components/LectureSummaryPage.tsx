@@ -1,4 +1,3 @@
-// components/LectureSummaryPage.tsx
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -81,6 +80,17 @@ export default function LectureSummaryPage({
     }
   }
 
+  // Listen for the global refresh trigger dispatched from the top-right nav
+  useEffect(() => {
+    const onRefresh = () => {
+      if (!regenLoading && !loading) {
+        regenerateSummary();
+      }
+    };
+    window.addEventListener("lecture:regenerate", onRefresh);
+    return () => window.removeEventListener("lecture:regenerate", onRefresh);
+  }, [lectureId, regenLoading, loading]); // re-bind if id/loading state changes
+
   const mdComponents = useMemo(
     () => ({
       h1: (props: any) => (
@@ -160,23 +170,8 @@ export default function LectureSummaryPage({
             {lecture?.originalName || "Lecture Summary"}
           </h1>
         </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={regenerateSummary}
-            disabled={regenLoading || loading}
-            aria-label="Regenerate summary"
-            className={[
-              "px-3 py-2 rounded-lg border text-sm cursor-pointer",
-              regenLoading || loading
-                ? "border-gray-300 text-gray-400 bg-gray-100 cursor-not-allowed"
-                : "border-gray-300 text-black hover:bg-gray-100",
-            ].join(" ")}
-            title="Re-run the summarization on this lecture"
-          >
-            {regenLoading ? "Regenerating…" : "Regenerate"}
-          </button>
-        </div>
+        {/* Right side intentionally empty (Refresh lives in the global top-right nav) */}
+        <div />
       </div>
 
       {/* Content */}
