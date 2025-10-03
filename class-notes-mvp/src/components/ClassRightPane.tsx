@@ -1,6 +1,7 @@
+// src/components/ClassRightPane.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import RecorderPanel from "@/components/RecorderPanel";
 import ClassChat from "@/components/ClassChat";
@@ -8,14 +9,16 @@ import ClassSettingsPanel from "@/components/ClassSettingsPanel";
 import LectureSummaryPage from "@/components/LectureSummaryPage";
 import ClassHomeGrid from "@/components/ClassHomeGrid";
 
+type TabKey = "home" | "chat" | "record" | "class";
+
 export default function ClassRightPane({
   classId,
-  initialTab = "home",
+  initialTab = "home", // kept for compatibility, not used as source of truth
   classTitle,
   lectures = [],
 }: {
   classId: string;
-  initialTab?: "home" | "chat" | "record" | "class";
+  initialTab?: TabKey;
   classTitle?: string;
   lectures?: any[];
 }) {
@@ -23,24 +26,21 @@ export default function ClassRightPane({
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const [tab, setTab] = useState<"home" | "chat" | "record" | "class">(initialTab);
   const [recActive, setRecActive] = useState(false);
 
-  // URL-derived intents
+  // -------- URL → state derivations (single source of truth) --------
   const urlWantsRecord = searchParams.get("record") === "1";
   const urlWantsSettingsTab = searchParams.get("tab") === "class";
   const urlWantsChatTab = searchParams.get("tab") === "chat";
 
-  // Summary overlay (independent of tab)
   const viewLecture = searchParams.get("view") === "lecture";
   const lectureId = (searchParams.get("lectureId") || "").trim();
 
-  // React to URL changes -> set tab (summary overlay handled separately)
-  useEffect(() => {
-    if (urlWantsRecord) setTab("record");
-    else if (urlWantsSettingsTab) setTab("class");
-    else if (urlWantsChatTab) setTab("chat");
-    else setTab("home");
+  const tab: TabKey = useMemo(() => {
+    if (urlWantsRecord) return "record";
+    if (urlWantsSettingsTab) return "class";
+    if (urlWantsChatTab) return "chat";
+    return "home";
   }, [urlWantsRecord, urlWantsSettingsTab, urlWantsChatTab]);
 
   // Recording status indicator (red dot)
@@ -56,33 +56,42 @@ export default function ClassRightPane({
     return () => window.removeEventListener("rec:active", handler as EventListener);
   }, []);
 
-  // Navigate to a tab and CLEAR summary params so overlay collapses
-  function go(next: "home" | "record" | "chat" | "class") {
-    const current = new URLSearchParams(searchParams.toString());
+  // Navigate by writing URL only (no local tab state); skip if URL already matches
+  const go = useCallback(
+    (next: TabKey) => {
+      const current = new URLSearchParams(searchParams.toString());
 
-    // Always clear any summary view when a top tab is clicked
-    current.delete("view");
-    current.delete("lectureId");
+      // Always clear any summary overlay when switching tabs
+      current.delete("view");
+      current.delete("lectureId");
 
-    if (next === "record") {
-      current.set("record", "1");
-      current.delete("tab");
-    } else if (next === "class") {
-      current.delete("record");
-      current.set("tab", "class");
-    } else if (next === "chat") {
-      current.delete("record");
-      current.set("tab", "chat");
-    } else {
-      // home
-      current.delete("record");
-      current.delete("tab");
-    }
+      if (next === "record") {
+        current.set("record", "1");
+        current.delete("tab");
+      } else if (next === "class") {
+        current.delete("record");
+        current.set("tab", "class");
+      } else if (next === "chat") {
+        current.delete("record");
+        current.set("tab", "chat");
+      } else {
+        // home
+        current.delete("record");
+        current.delete("tab");
+      }
 
-    setTab(next);
-    const qs = current.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }
+      const qs = current.toString();
+      const nextUrl = qs ? `${pathname}?${qs}` : pathname;
+
+      const curQs = searchParams.toString();
+      const curUrl = curQs ? `${pathname}?${curQs}` : pathname;
+
+      if (nextUrl !== curUrl) {
+        router.replace(nextUrl, { scroll: false });
+      }
+    },
+    [pathname, router, searchParams]
+  );
 
   // Icon nav model
   const NAV = [
@@ -91,7 +100,6 @@ export default function ClassRightPane({
     { key: "chat" as const,   icon: "/icons/message-circle-dots.svg", title: "Chat" },
     { key: "class" as const,  icon: "/icons/gear.svg",                title: "Settings" },
   ];
-
   const isActive = (k: typeof NAV[number]["key"]) => tab === k;
 
   return (
@@ -101,7 +109,7 @@ export default function ClassRightPane({
         <div className="h-full w-full flex flex-col bg-white">
           <div className="px-4 py-4 border-b border-gray-200 flex items-center justify-between">
             <h1 className="text-sm font-semibold text-black truncate">Main</h1>
-            {/* Invisible Back button placeholder (keeps header height consistent) */}
+            {/* Invisible Back placeholder (keeps header height consistent) */}
             <button
               disabled
               className="invisible px-4 py-2 rounded-lg border border-gray-300 text-sm"
@@ -117,7 +125,7 @@ export default function ClassRightPane({
         </div>
       )}
 
-      {/* Top-right icon nav (separate squares; always visible).
+      {/* Top-right icon nav (always visible).
           Includes conditional Refresh button on far left ONLY when summary overlay is open. */}
       <div className="absolute right-4 top-4 z-30 flex items-center gap-2">
         {/* Refresh button — only when the lecture overlay is shown */}

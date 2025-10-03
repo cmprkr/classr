@@ -31,6 +31,7 @@ export default async function ClassPage(props: {
           summaryJson: true,
           transcript: true,
           textContent: true,
+          keyTermsJson: true,
           includeInMemory: true, // legacy (still sent, but we prefer viewerIncludeInAISummary)
           syncKey: true,
           createdAt: true,
@@ -80,6 +81,7 @@ export default async function ClassPage(props: {
         summaryJson: true,
         transcript: true,
         textContent: true,
+        keyTermsJson: true,
         includeInMemory: true, // legacy
         syncKey: true,
         createdAt: true,
